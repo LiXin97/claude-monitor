@@ -147,6 +147,31 @@ def test_detect_working_middle_dot_spinner():
     assert detect_state(WORKING_MIDDLE_DOT) == PaneState.WORKING
 
 
+# Working state: task list with in-progress task visible near prompt
+WORKING_TASK_LIST = """\
+● Block 02 Phase 1 — running, healthy, ~25%.
+
+  8 tasks (5 done, 1 in progress, 2 open)
+  ✔ Set up TCAD project structure
+  ◻ Paper writing pipeline › blocked by #4
+  ◼ Run Block 2: TCAD training + baselines (Gate G2)
+  ✔ Run Block 1
+  ✔ Implement TCAD core pipeline
+  ✔ Download missing models
+  ◻ Run ablations + analysis › blocked by #4
+  ✔ Implement 2-stream GPU parallelism
+
+──────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)"""
+
+
+def test_detect_working_task_list_in_progress():
+    """Task list with ◼ in-progress indicator must detect WORKING, not IDLE."""
+    assert detect_state(WORKING_TASK_LIST) == PaneState.WORKING
+
+
 # --- StateTracker tests ---
 
 

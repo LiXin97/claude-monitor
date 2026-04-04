@@ -39,6 +39,8 @@ _WORKING_PATTERNS = [
     re.compile(r"Will check again in"),
     re.compile(r"Running…"),
     re.compile(r"↓ [\d.]+k tokens"),
+    re.compile(r"\d+ tasks? \(.*\d+ in progress"),  # task list with in-progress
+    re.compile(r"^\s*◼ ", re.MULTILINE),  # in-progress task indicator
 ]
 
 _TIMING_PATTERN = re.compile(r"\(\d+[hms]\s+\d+[hms].*?·")
