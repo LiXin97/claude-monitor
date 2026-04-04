@@ -45,6 +45,8 @@ def detect_state(content: str) -> PaneState:
         r"^● \w+\(.*\)",          # Tool execution: ● Bash(...), ● Agent(...)
         r"^[✢✽] ",                # Active spinners: ✢ Verifying..., ✽ Building...
         r"Running \d+ agents",
+        r"✻ Running scheduled task",  # Cron task active
+        r"Will check again in",       # Monitoring pause between cron checks
     ]
 
     # Task panel indicators (only count as working if combined with spinner)

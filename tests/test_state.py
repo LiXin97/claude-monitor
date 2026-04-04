@@ -74,6 +74,24 @@ WORKING_WITH_PROMPT = """\
 ──────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)"""
 
+# Scheduled task monitoring pause (cron fires periodically, idle between checks)
+SCHEDULED_TASK_PAUSE = """\
+● Still running. Step 4: Utility Probe — 474/1200 rollouts (40%), ~48 min remaining. Will check again in 3 minutes.
+
+  7 tasks (3 done, 1 in progress, 3 open)
+  ✔ Set up TCAD project structure and conda environment
+  ◻ Paper writing pipeline for NeurIPS submission › blocked by #4
+  ◻ Run Block 2: TCAD training + baselines (Gate G2) › blocked by #5
+  ◼ Run Block 1: Warm-start + Utility Probe (Gate G1)
+  ✔ Implement TCAD core pipeline
+  ✔ Download missing models (14B teacher, datasets)
+  ◻ Run ablations + analysis + multi-seed significance › blocked by #4
+
+──────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)"""
+
 
 def test_detect_idle():
     assert detect_state(IDLE_SCREEN) == PaneState.IDLE
@@ -102,6 +120,11 @@ def test_detect_empty_content():
 def test_detect_working_with_prompt_visible():
     """Claude Code shows prompt at bottom while sub-agents are running."""
     assert detect_state(WORKING_WITH_PROMPT) == PaneState.WORKING
+
+
+def test_detect_working_scheduled_task_pause():
+    """Scheduled task monitoring: idle prompt but 'Will check again' visible."""
+    assert detect_state(SCHEDULED_TASK_PAUSE) == PaneState.WORKING
 
 
 # --- StateTracker tests ---

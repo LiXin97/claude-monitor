@@ -19,6 +19,11 @@ from claude_monitor.scraper import capture_pane, send_keys
 logger = logging.getLogger(__name__)
 
 
+def _escape_html(text: str) -> str:
+    """Escape HTML special characters for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def extract_context_lines(content: str, max_lines: int = 10) -> list[str]:
     """Extract meaningful context lines from pane content, filtering noise."""
     lines = content.strip().splitlines()
@@ -43,32 +48,23 @@ def extract_context_lines(content: str, max_lines: int = 10) -> list[str]:
 
 def format_notification(machine_name: str, transition: StateTransition) -> str:
     """Format a state transition into a Telegram notification message."""
-    context = extract_context_lines(transition.content, max_lines=8)
-    context_text = "\n".join(f"> {line}" for line in context)
+    context = extract_context_lines(transition.content, max_lines=15)
+    context_text = "\n".join(context)
 
     if transition.new_state == PaneState.IDLE:
-        return (
-            f"🟢 [{machine_name}] Claude Code finished task\n"
-            f"Session: {transition.pane_id}\n"
-            f"Last output:\n{context_text}"
-        )
+        header = f"🟢 <b>[{machine_name}] Claude Code finished task</b>"
     elif transition.new_state == PaneState.NEEDS_INPUT:
-        return (
-            f"🟡 [{machine_name}] Claude Code waiting for input\n"
-            f"Session: {transition.pane_id}\n"
-            f"Context:\n{context_text}"
-        )
+        header = f"🟡 <b>[{machine_name}] Claude Code waiting for input</b>"
     elif transition.new_state == PaneState.PERMISSION:
-        return (
-            f"🔴 [{machine_name}] Claude Code asking permission\n"
-            f"Session: {transition.pane_id}\n"
-            f"{context_text}"
-        )
+        header = f"🔴 <b>[{machine_name}] Claude Code asking permission</b>"
     else:
-        return (
-            f"ℹ️ [{machine_name}] State changed to {transition.new_state.value}\n"
-            f"Session: {transition.pane_id}"
-        )
+        header = f"ℹ️ <b>[{machine_name}] State → {transition.new_state.value}</b>"
+
+    return (
+        f"{header}\n"
+        f"Session: <code>{transition.pane_id}</code>\n\n"
+        f"<pre>{_escape_html(context_text)}</pre>"
+    )
 
 
 def parse_send_command(args: str) -> tuple[str, str | None, str] | None:
@@ -202,7 +198,9 @@ class TelegramBot:
         if not self._app:
             return
         msg = format_notification(self._machine_name, transition)
-        await self._app.bot.send_message(chat_id=self._chat_id, text=msg)
+        await self._app.bot.send_message(
+            chat_id=self._chat_id, text=msg, parse_mode="HTML"
+        )
 
         # Track waiting panes for quick reply
         if transition.new_state in (PaneState.NEEDS_INPUT, PaneState.PERMISSION):
