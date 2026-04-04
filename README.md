@@ -29,10 +29,16 @@ claude-monitor watches your tmux panes, detects when Claude Code changes state, 
   - Finishes a task (🟢 idle)
   - Needs your input (🟡 needs_input)
   - Asks for permission (🔴 permission)
+- **Inline buttons** — Approve/Deny permission requests or View terminal output directly from the notification
+- **Reply routing** — reply to any notification message to send text to that specific pane
+- **Smart silence** — suppresses notifications when you're actively using Telegram (configurable window, default 5 min)
+- **Hook integration** — optional HTTP hook server receives Claude Code events (Stop, Notification, PermissionRequest) for instant, zero-delay notifications
+- **Blocking permission approval** — PermissionRequest hooks block Claude Code until you approve or deny via Telegram
 - **Smart filtering** — only notifies on actionable states; ignores transitions to working/unknown
 - **Scheduled task aware** — detects cron monitoring pauses ("Will check again in...") as working, not idle
 - **Remote input** — reply directly from Telegram to send text into the tmux pane
 - **Quick reply** — when only one pane is waiting, just type your message (no commands needed)
+- **Pane aliases** — auto-assigned numeric IDs (1, 2, 3...) for easy reference in commands
 - **Multi-machine** — run on multiple servers with the same Telegram bot, each identified by name
 - **Debounced** — state must be stable for 2 consecutive polls before notifying (no false alarms)
 - **HTML notifications** — formatted messages with bold headers and code blocks in Telegram
@@ -42,12 +48,15 @@ claude-monitor watches your tmux panes, detects when Claude Code changes state, 
 | Command | Description |
 |---------|-------------|
 | `/status` | Show all Claude Code pane states across all machines |
+| `/status <machine>` | Show pane states for a specific machine |
 | `/view <machine>` | View last 30 lines of terminal output |
+| `/view <machine> <alias>` | View a specific pane by number |
 | `/send <machine> <text>` | Send input to a pane |
-| `/send <machine>:<pane> <text>` | Send to a specific pane |
+| `/send <machine> <alias> <text>` | Send to a specific pane by number |
+| `/send <machine>:<pane> <text>` | Send to a specific pane by full ID |
 | `/machines` | List connected machines |
 
-When exactly one pane is waiting for input, just type your message directly — no command needed.
+When exactly one pane is waiting for input, just type your message directly — no command needed. You can also **reply to any notification** to send text to that pane.
 
 ## Install
 
@@ -113,10 +122,25 @@ monitor:
   poll_interval: 5         # seconds between checks
   stable_threshold: 2      # polls before notification (avoids flapping)
   context_lines: 30        # terminal lines to capture
+  notification_silence_seconds: 300  # suppress notifications for N seconds after user interaction (0 to disable)
+  hooks_enabled: false     # enable Claude Code hooks integration
+  hook_server_port: 9876   # HTTP port for hook server
 
 # Optional: only monitor specific panes (default: auto-discover all)
 sessions: []
 ```
+
+## Claude Code Hooks (Optional)
+
+For instant, zero-delay notifications and blocking permission approval, you can connect Claude Code's hooks system directly to claude-monitor.
+
+```bash
+claude-monitor install-hooks
+```
+
+This configures `~/.claude/settings.json` with hooks for Stop, Notification, and PreToolUse events, and enables `hooks_enabled` in your monitor config. Restart the monitor after installation.
+
+When hooks are enabled, the monitor starts an HTTP server on `localhost:9876`. Claude Code sends events to this server, which forwards them to Telegram. Permission requests (Bash, Write, Edit) block Claude Code until you approve or deny via inline buttons in Telegram.
 
 ## Multi-Machine Setup
 
@@ -146,7 +170,10 @@ Each machine uses non-blocking polls with conflict handling, so all instances ca
    - `permission` — approval prompt (`Allow?`, `(y/n)`)
 3. **Debounce** — state must be stable for `stable_threshold` consecutive polls before triggering
 4. **Notification filter** — only sends alerts for actionable states (idle, needs_input, permission); transitions to working or unknown are silent
-5. **Telegram** — sends HTML-formatted notifications on state transitions, accepts commands via non-blocking polling
+5. **Smart silence** — suppresses notifications if you interacted with the bot within the silence window
+6. **Inline buttons** — Approve/Deny for permission prompts, View for idle/input states
+7. **Hook server** (optional) — receives Claude Code events via HTTP for instant notifications and blocking permission approval
+8. **Telegram** — sends HTML-formatted notifications on state transitions, accepts commands via non-blocking polling
 
 No inbound ports needed — all communication uses outbound HTTPS. Works behind NAT/firewalls.
 
@@ -156,6 +183,7 @@ No inbound ports needed — all communication uses outbound HTTPS. Works behind 
 claude-monitor init              # Interactive setup
 claude-monitor run [-v] [-c ..]  # Run in foreground
 claude-monitor status [-c ..]    # Show discovered panes
+claude-monitor install-hooks     # Configure Claude Code hooks integration
 claude-monitor install-service   # Install systemd user service
 claude-monitor stop              # Stop the systemd service
 ```
