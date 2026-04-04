@@ -56,7 +56,9 @@ def extract_context_lines(content: str, max_lines: int = 10) -> list[str]:
     return filtered[-max_lines:]
 
 
-def format_notification(machine_name: str, transition: StateTransition) -> str:
+def format_notification(
+    machine_name: str, transition: StateTransition, alias: int | None = None
+) -> str:
     """Format a state transition into a Telegram notification message."""
     context = extract_context_lines(transition.content, max_lines=15)
     context_text = "\n".join(context)
@@ -67,9 +69,13 @@ def format_notification(machine_name: str, transition: StateTransition) -> str:
     )
     header = f"{icon} <b>[{machine_name}] {msg}</b>"
 
+    session_label = transition.pane_id
+    if alias is not None:
+        session_label = f"{alias}: {transition.pane_id}"
+
     return (
         f"{header}\n"
-        f"Session: <code>{transition.pane_id}</code>\n\n"
+        f"Session: <code>{session_label}</code>\n\n"
         f"<pre>{escape_html(context_text)}</pre>"
     )
 
@@ -80,6 +86,7 @@ def parse_send_command(args: str) -> tuple[str, str | None, str] | None:
     Formats:
         "machine-name some text" -> (machine_name, None, text)
         "machine-name:session:win.pane some text" -> (machine_name, pane_id, text)
+        "machine-name 2 some text" -> (machine_name, "2", text)  # numeric alias
     """
     args = args.strip()
     if not args:
@@ -89,18 +96,21 @@ def parse_send_command(args: str) -> tuple[str, str | None, str] | None:
     if len(parts) < 2:
         return None
 
-    target, text = parts
+    target, rest = parts
 
     # Check if target contains a pane specifier (machine:session:win.pane)
-    # Machine names don't contain colons; pane IDs have format session:win.pane
     colon_idx = target.find(":")
     if colon_idx > 0:
-        # Could be machine:session:win.pane
         machine = target[:colon_idx]
         pane_id = target[colon_idx + 1:]
-        return (machine, pane_id, text)
+        return (machine, pane_id, rest)
 
-    return (target, None, text)
+    # Check if rest starts with a numeric alias: "2 some text"
+    rest_parts = rest.split(None, 1)
+    if len(rest_parts) == 2 and rest_parts[0].isdigit():
+        return (target, rest_parts[0], rest_parts[1])
+
+    return (target, None, rest)
 
 
 class TelegramBot:
@@ -121,6 +131,10 @@ class TelegramBot:
         self._poll_task: asyncio.Task | None = None
         # Track which panes are awaiting input (for quick reply)
         self._waiting_panes: list[str] = []
+        # Pane aliases: pane_id → numeric alias (1, 2, 3...)
+        self._pane_aliases: dict[str, int] = {}
+        self._alias_to_pane: dict[int, str] = {}
+        self._next_alias: int = 1
 
     async def initialize(self) -> None:
         self._app = (
@@ -205,7 +219,8 @@ class TelegramBot:
         """Send a notification message for a state transition."""
         if not self._app:
             return
-        msg = format_notification(self._machine_name, transition)
+        alias = self._pane_aliases.get(transition.pane_id)
+        msg = format_notification(self._machine_name, transition, alias=alias)
         await self._app.bot.send_message(
             chat_id=self._chat_id, text=msg, parse_mode="HTML"
         )
@@ -216,6 +231,38 @@ class TelegramBot:
             pid for pid, state in pane_states.items()
             if state in (PaneState.NEEDS_INPUT, PaneState.PERMISSION)
         ]
+
+    def update_pane_aliases(self, pane_ids: list[str]) -> None:
+        """Assign stable numeric aliases to discovered panes.
+
+        New panes get the next available number.  Removed panes lose their
+        alias (the number is not reused until restart).
+        """
+        current = set(pane_ids)
+        # Remove aliases for gone panes
+        gone = set(self._pane_aliases) - current
+        for pid in gone:
+            alias = self._pane_aliases.pop(pid)
+            self._alias_to_pane.pop(alias, None)
+        # Assign aliases to new panes
+        for pid in pane_ids:
+            if pid not in self._pane_aliases:
+                self._pane_aliases[pid] = self._next_alias
+                self._alias_to_pane[self._next_alias] = pid
+                self._next_alias += 1
+
+    def _resolve_pane(self, alias_or_id: str) -> str | None:
+        """Resolve a numeric alias or raw pane_id to a pane_id."""
+        if alias_or_id.isdigit():
+            return self._alias_to_pane.get(int(alias_or_id))
+        return alias_or_id
+
+    def _format_pane_label(self, pane_id: str) -> str:
+        """Format pane_id with its alias for display, e.g. '1: copilot-api:1.0'."""
+        alias = self._pane_aliases.get(pane_id)
+        if alias is not None:
+            return f"{alias}: {pane_id}"
+        return pane_id
 
     async def _handle_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -238,7 +285,8 @@ class TelegramBot:
         lines = [f"📊 [{self._machine_name}] Status:"]
         for pane_id, state in states.items():
             icon = STATE_ICONS.get(state, "⚪")
-            lines.append(f"  {icon} {pane_id}: {state.value}")
+            label = self._format_pane_label(pane_id)
+            lines.append(f"  {icon} {label}: {state.value}")
         await update.message.reply_text("\n".join(lines))
 
     async def _handle_view(
@@ -265,6 +313,12 @@ class TelegramBot:
             return
 
         pane_id = args[1] if len(args) > 1 else next(iter(states))
+        # Resolve numeric alias to pane_id
+        resolved = self._resolve_pane(pane_id)
+        if resolved is None:
+            await update.message.reply_text(f"Unknown pane alias: {pane_id}")
+            return
+        pane_id = resolved
         content = capture_pane(pane_id, context_lines=30)
         if not content:
             await update.message.reply_text(f"Could not capture pane {pane_id}")
@@ -273,8 +327,9 @@ class TelegramBot:
         # Truncate for Telegram message limit (4096 chars)
         if len(content) > 3900:
             content = content[-3900:]
+        label = self._format_pane_label(pane_id)
         await update.message.reply_text(
-            f"📺 [{self._machine_name}] {pane_id}:\n```\n{content}\n```",
+            f"📺 [{self._machine_name}] {label}:\n```\n{content}\n```",
             parse_mode="Markdown",
         )
 
@@ -289,7 +344,7 @@ class TelegramBot:
         if parsed is None:
             await update.message.reply_text(
                 "Usage: /send <machine> <text>\n"
-                "       /send <machine>:<pane> <text>"
+                "       /send <machine> <alias> <text>"
             )
             return
 
@@ -308,12 +363,20 @@ class TelegramBot:
                 else:
                     await update.message.reply_text("No active sessions found.")
                     return
+        else:
+            # Resolve numeric alias
+            resolved = self._resolve_pane(pane_id)
+            if resolved is None:
+                await update.message.reply_text(f"Unknown pane alias: {pane_id}")
+                return
+            pane_id = resolved
 
         ok = send_keys(pane_id, text)
+        label = self._format_pane_label(pane_id)
         if ok:
-            await update.message.reply_text(f"✅ Sent to {pane_id}")
+            await update.message.reply_text(f"✅ Sent to {label}")
         else:
-            await update.message.reply_text(f"❌ Failed to send to {pane_id}")
+            await update.message.reply_text(f"❌ Failed to send to {label}")
 
     async def _handle_machines(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -342,17 +405,20 @@ class TelegramBot:
                     "No pane is waiting for input. Use /send <machine> <text>."
                 )
             else:
-                pane_list = ", ".join(self._waiting_panes)
+                pane_list = ", ".join(
+                    self._format_pane_label(p) for p in self._waiting_panes
+                )
                 await update.message.reply_text(
                     f"Multiple panes waiting: {pane_list}\n"
-                    "Use /send <machine>:<pane> <text> to specify."
+                    "Use /send <machine> <alias> <text> to specify."
                 )
             return
 
         pane_id = self._waiting_panes[0]
         text = update.message.text
         ok = send_keys(pane_id, text)
+        label = self._format_pane_label(pane_id)
         if ok:
-            await update.message.reply_text(f"✅ → {pane_id}")
+            await update.message.reply_text(f"✅ → {label}")
         else:
-            await update.message.reply_text(f"❌ Failed to send to {pane_id}")
+            await update.message.reply_text(f"❌ Failed to send to {label}")

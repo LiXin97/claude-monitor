@@ -54,7 +54,8 @@ class Monitor:
                 )
                 await self._telegram.send_notification(transition)
 
-        # Update waiting panes list for quick reply
+        # Update waiting panes list and aliases
+        self._telegram.update_pane_aliases([p.pane_id for p in panes])
         self._telegram.update_waiting_panes(self._state_tracker.get_all_states())
 
     async def run(self) -> None:

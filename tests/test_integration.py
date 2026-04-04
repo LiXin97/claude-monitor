@@ -71,6 +71,7 @@ async def test_full_lifecycle(config):
         monitor._telegram = AsyncMock()
         monitor._telegram.send_notification = AsyncMock(side_effect=capture_notification)
         monitor._telegram.update_waiting_panes = MagicMock()
+        monitor._telegram.update_pane_aliases = MagicMock()
 
         for _ in range(6):
             await monitor._poll_once()

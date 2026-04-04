@@ -118,8 +118,8 @@ def status(config_path):
         return
 
     click.echo(f"[{cfg.machine_name}] Found {len(panes)} Claude Code pane(s):")
-    for pane in panes:
-        click.echo(f"  • {pane.pane_id} (pid: {pane.pid})")
+    for i, pane in enumerate(panes, 1):
+        click.echo(f"  {i}: {pane.pane_id} (pid: {pane.pid})")
 
 
 @main.command("install-service")
