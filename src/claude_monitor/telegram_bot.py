@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -132,6 +132,14 @@ class TelegramBot:
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling(drop_pending_updates=True)
+
+        # Set bot menu commands
+        await self._app.bot.set_my_commands([
+            BotCommand("status", "Show Claude Code pane states"),
+            BotCommand("view", "View last 30 lines of a pane"),
+            BotCommand("send", "Send input to a pane"),
+            BotCommand("machines", "List all connected machines"),
+        ])
 
     async def shutdown(self) -> None:
         if self._app:

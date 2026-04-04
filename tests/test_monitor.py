@@ -89,7 +89,7 @@ async def test_monitor_cleans_up_removed_panes(config):
 
     with (
         patch("claude_monitor.monitor.discover_panes") as mock_discover,
-        patch("claude_monitor.monitor.capture_pane", return_value="● working"),
+        patch("claude_monitor.monitor.capture_pane", return_value="● Bash(ls)\n  ⎿  Running..."),
     ):
         monitor = Monitor(config)
         monitor._telegram = AsyncMock()

@@ -40,23 +40,55 @@ def detect_state(content: str) -> PaneState:
         if re.search(pattern, last_text):
             return PaneState.PERMISSION
 
-    # Check for active work indicators
+    # Check for active work indicators (spinners, tool execution)
     working_patterns = [
-        r"^● \w",          # Tool execution: ● Bash(...), ● Agent(...)
-        r"^✢ ",             # Spinner: ✢ Verifying...
+        r"^● \w+\(.*\)",          # Tool execution: ● Bash(...), ● Agent(...)
+        r"^[✢✽] ",                # Active spinners: ✢ Verifying..., ✽ Building...
         r"Running \d+ agents",
     ]
-    # Only match working if there's no prompt below the working indicator
+
+    # Task panel indicators (only count as working if combined with spinner)
+    task_panel_pattern = r"^[◻◼] "
+
     has_prompt = bool(re.search(r"^❯\s*$", last_text, re.MULTILINE))
 
-    if not has_prompt:
-        for pattern in working_patterns:
-            if re.search(pattern, last_text, re.MULTILINE):
+    # Check for working indicators anywhere in the last lines
+    has_working_indicator = False
+    for pattern in working_patterns:
+        if re.search(pattern, last_text, re.MULTILINE):
+            has_working_indicator = True
+            break
+
+    # Also detect working by spinner with timing pattern: "... (5m 41s · ↓ 8.6k tokens)"
+    if re.search(r"\(\d+[ms]\s+\d+s\s*·", last_text):
+        has_working_indicator = True
+
+    # If there's a spinner/working indicator AND prompt visible, check if the
+    # spinner is ABOVE the prompt (Claude Code shows prompt at bottom while working)
+    if has_working_indicator and has_prompt:
+        # Find the prompt position
+        prompt_idx = None
+        for i in range(len(last_lines) - 1, -1, -1):
+            if re.match(r"^❯\s*$", last_lines[i]):
+                prompt_idx = i
+                break
+
+        if prompt_idx is not None:
+            above_prompt = "\n".join(last_lines[:prompt_idx])
+            # If there's a spinner or active task indicator above the prompt,
+            # Claude Code is working (prompt visible but waiting for sub-agent)
+            for pattern in working_patterns:
+                if re.search(pattern, above_prompt, re.MULTILINE):
+                    return PaneState.WORKING
+            if re.search(r"\(\d+[ms]\s+\d+s\s*·", above_prompt):
                 return PaneState.WORKING
+
+    # No prompt visible + working indicator = definitely working
+    if not has_prompt and has_working_indicator:
+        return PaneState.WORKING
 
     # Check for prompt (❯) — indicates idle or needs_input
     if has_prompt:
-        # Look above the prompt for question indicators
         # Find content above the last ❯ prompt
         prompt_idx = None
         for i in range(len(last_lines) - 1, -1, -1):
@@ -66,12 +98,6 @@ def detect_state(content: str) -> PaneState:
 
         if prompt_idx is not None:
             above_prompt = "\n".join(last_lines[:prompt_idx])
-
-            # Check for "Brewed for" / "Worked for" / "Crunched for"
-            # immediately above the prompt with no question = idle
-            has_completion = bool(
-                re.search(r"✻ (Brewed|Worked|Crunched) for", above_prompt)
-            )
 
             # Check for question-like content above prompt
             question_patterns = [

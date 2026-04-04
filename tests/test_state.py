@@ -58,6 +58,22 @@ PERMISSION_SCREEN_2 = """\
 
   Allow this command? Press Enter to approve, Esc to deny."""
 
+# Working state with prompt visible (sub-agents running, prompt at bottom)
+WORKING_WITH_PROMPT = """\
+● Now launch two parallel sub-agents: one for API layer, one for Data layer.
+
+✽ Building API and data foundation… (12m 53s · ↓ 26.5k tokens)
+  ⎿  ◻ Phase 6: Debate + Block 0.2 + analysis › blocked by #18
+     ◻ Phase 4: Block 0.1 experiment script › blocked by #16
+     ◼ Phase 1+2: Build API layer + Data layer foundation
+     ◻ Phase 5: Pilot test (10 questions) › blocked by #17
+     ◻ Phase 3: Alpha measurement core › blocked by #17
+
+──────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)"""
+
 
 def test_detect_idle():
     assert detect_state(IDLE_SCREEN) == PaneState.IDLE
@@ -81,6 +97,11 @@ def test_detect_permission_2():
 
 def test_detect_empty_content():
     assert detect_state("") == PaneState.UNKNOWN
+
+
+def test_detect_working_with_prompt_visible():
+    """Claude Code shows prompt at bottom while sub-agents are running."""
+    assert detect_state(WORKING_WITH_PROMPT) == PaneState.WORKING
 
 
 # --- StateTracker tests ---
