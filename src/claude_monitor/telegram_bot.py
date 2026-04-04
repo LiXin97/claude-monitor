@@ -228,10 +228,12 @@ class TelegramBot:
             and update.effective_chat.id == self._chat_id
         )
 
-    async def send_message(self, text: str) -> None:
+    async def send_message(self, text: str, parse_mode: str | None = None) -> None:
         """Send a plain text message to the configured chat."""
         if self._app:
-            await self._app.bot.send_message(chat_id=self._chat_id, text=text)
+            await self._app.bot.send_message(
+                chat_id=self._chat_id, text=text, parse_mode=parse_mode,
+            )
 
     async def send_notification(self, transition: StateTransition) -> None:
         """Send a notification message for a state transition."""
@@ -275,17 +277,17 @@ class TelegramBot:
         label: str,
         tool_name: str,
         input_preview: str,
-        session_id: str,
+        project: str = "",
     ) -> None:
         """Send a hook permission request with Approve/Deny buttons."""
         if not self._app:
             return
-        msg = (
-            f"🔐 {label}Claude Code permission request\n"
-            f"Tool: <code>{escape_html(tool_name)}</code>\n"
-            f"Session: <code>{session_id}</code>\n\n"
-            f"<pre>{escape_html(input_preview)}</pre>"
-        )
+        parts = [f"🔐 {label}Claude Code permission request"]
+        if project:
+            parts.append(f"Project: <code>{escape_html(project)}</code>")
+        parts.append(f"Tool: <code>{escape_html(tool_name)}</code>")
+        parts.append(f"\n<pre>{escape_html(input_preview)}</pre>")
+        msg = "\n".join(parts)
         keyboard = [[
             InlineKeyboardButton("✅ Allow", callback_data=f"hook_approve:{request_id}"),
             InlineKeyboardButton("❌ Deny", callback_data=f"hook_deny:{request_id}"),

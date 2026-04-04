@@ -9,9 +9,17 @@ Uses only stdlib asyncio (no aiohttp dependency).
 import asyncio
 import json
 import logging
+import os
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def _project_name(cwd: str) -> str:
+    """Extract a short project identifier from cwd path."""
+    if not cwd:
+        return ""
+    return os.path.basename(cwd.rstrip("/"))
 
 
 class HookServer:
@@ -139,23 +147,49 @@ class HookServer:
         await writer.drain()
 
     async def _handle_stop(self, body: dict, writer: asyncio.StreamWriter) -> None:
-        session_id = body.get("session_id", "unknown")
         cwd = body.get("cwd", "")
+        project = _project_name(cwd)
+        last_msg = body.get("last_assistant_message", "")
         label = f"[{self._machine_name}] " if self._machine_name else ""
-        msg = f"🛑 {label}Claude Code session stopped\nSession: {session_id}"
+
+        # Build a short preview of what Claude said
+        preview = ""
+        if last_msg:
+            # First non-empty line, truncated
+            for line in last_msg.strip().splitlines():
+                line = line.strip()
+                if line:
+                    preview = line[:200]
+                    break
+
+        header = f"🏁 {label}Claude Code turn ended"
+        parts = [header]
+        if project:
+            parts.append(f"Project: <code>{project}</code>")
         if cwd:
-            msg += f"\nCWD: {cwd}"
-        await self._telegram_bot.send_message(msg)
+            parts.append(f"CWD: <code>{cwd}</code>")
+        if preview:
+            parts.append(f"\n{preview}")
+        msg = "\n".join(parts)
+        await self._telegram_bot.send_message(msg, parse_mode="HTML")
         await self._send_response(writer, 200, {"status": "ok"})
 
     async def _handle_notification(
         self, body: dict, writer: asyncio.StreamWriter
     ) -> None:
         message = body.get("message", "")
-        session_id = body.get("session_id", "unknown")
+        cwd = body.get("cwd", "")
+        project = _project_name(cwd)
         label = f"[{self._machine_name}] " if self._machine_name else ""
-        msg = f"ℹ️ {label}Hook notification\nSession: {session_id}\n\n{message}"
-        await self._telegram_bot.send_message(msg)
+
+        header = f"ℹ️ {label}Claude Code notification"
+        parts = [header]
+        if project:
+            parts.append(f"Project: <code>{project}</code>")
+        if message:
+            parts.append(f"\n{message}")
+        msg = "\n".join(parts)
+        await self._telegram_bot.send_message(msg, parse_mode="HTML")
         await self._send_response(writer, 200, {"status": "ok"})
 
     async def _handle_permission(
@@ -164,6 +198,8 @@ class HookServer:
         tool_name = body.get("tool_name", "unknown")
         tool_input = body.get("tool_input", {})
         session_id = body.get("session_id", "unknown")
+        cwd = body.get("cwd", "")
+        project = _project_name(cwd)
 
         req_id = uuid.uuid4().hex[:12]
         event = asyncio.Event()
@@ -182,7 +218,7 @@ class HookServer:
             label=label,
             tool_name=tool_name,
             input_preview=input_preview,
-            session_id=session_id,
+            project=project,
         )
 
         # Block until user responds or timeout

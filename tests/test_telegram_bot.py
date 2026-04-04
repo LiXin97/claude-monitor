@@ -397,7 +397,7 @@ async def test_send_hook_permission_sends_message_with_buttons():
         label="[test] ",
         tool_name="Bash",
         input_preview='{"command": "ls"}',
-        session_id="session-1",
+        project="my-project",
     )
 
     bot._app.bot.send_message.assert_called_once()

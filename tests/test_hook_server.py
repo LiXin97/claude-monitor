@@ -28,7 +28,7 @@ async def test_hook_server_starts_and_stops(hook_server):
 
 @pytest.mark.asyncio
 async def test_hook_stop_triggers_notification(hook_server):
-    """POST /hook/stop sends a Telegram notification."""
+    """POST /hook/stop sends a Telegram notification with project name."""
     await hook_server.start()
     port = hook_server.port
 
@@ -54,20 +54,22 @@ async def test_hook_stop_triggers_notification(hook_server):
     assert b"200" in response
     hook_server._telegram_bot.send_message.assert_called_once()
     msg = hook_server._telegram_bot.send_message.call_args[0][0]
-    assert "stopped" in msg.lower() or "finished" in msg.lower() or "stop" in msg.lower()
+    assert "project" in msg  # project name extracted from cwd
+    assert "turn ended" in msg.lower()
 
     await hook_server.stop()
 
 
 @pytest.mark.asyncio
 async def test_hook_notification_forwards_to_telegram(hook_server):
-    """POST /hook/notification forwards the message to Telegram."""
+    """POST /hook/notification forwards the message to Telegram with project name."""
     await hook_server.start()
     port = hook_server.port
 
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     body = json.dumps({
         "session_id": "abc123",
+        "cwd": "/home/user/my-app",
         "message": "Task completed successfully",
     })
     request = (
@@ -88,6 +90,7 @@ async def test_hook_notification_forwards_to_telegram(hook_server):
     hook_server._telegram_bot.send_message.assert_called_once()
     msg = hook_server._telegram_bot.send_message.call_args[0][0]
     assert "Task completed" in msg
+    assert "my-app" in msg  # project name from cwd
 
     await hook_server.stop()
 
