@@ -59,10 +59,11 @@ class HookServer:
             return
         event, result = self._pending_permissions[request_id]
         if allow:
-            result["behavior"] = "allow"
+            result["decision"] = "allow"
+            result["reason"] = ""
         else:
-            result["behavior"] = "deny"
-            result["message"] = "User denied via Telegram"
+            result["decision"] = "deny"
+            result["reason"] = "User denied via Telegram"
         event.set()
 
     async def _handle_connection(
@@ -166,7 +167,7 @@ class HookServer:
 
         req_id = uuid.uuid4().hex[:12]
         event = asyncio.Event()
-        result = {"behavior": "deny", "message": "Timeout — denied by default"}
+        result = {"decision": "deny", "reason": "Timeout — denied by default"}
 
         self._pending_permissions[req_id] = (event, result)
 
@@ -188,8 +189,18 @@ class HookServer:
         try:
             await asyncio.wait_for(event.wait(), timeout=self._permission_timeout)
         except asyncio.TimeoutError:
-            result["behavior"] = "deny"
-            result["message"] = "Timeout — denied by default"
+            result["decision"] = "deny"
+            result["reason"] = "Timeout — denied by default"
 
         self._pending_permissions.pop(req_id, None)
-        await self._send_response(writer, 200, result)
+
+        # Format response for Claude Code PreToolUse hook
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow" if result["decision"] == "allow" else "deny",
+            }
+        }
+        if result["decision"] != "allow" and result.get("reason"):
+            response["hookSpecificOutput"]["permissionDecisionReason"] = result["reason"]
+        await self._send_response(writer, 200, response)

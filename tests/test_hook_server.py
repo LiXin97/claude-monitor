@@ -131,7 +131,7 @@ async def test_hook_permission_blocks_until_approved(hook_server):
     assert b"200" in response
     response_body = response.split(b"\r\n\r\n", 1)[1]
     result = json.loads(response_body)
-    assert result["behavior"] == "allow"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
 
     await hook_server.stop()
 
@@ -173,7 +173,7 @@ async def test_hook_permission_blocks_until_denied(hook_server):
     assert b"200" in response
     response_body = response.split(b"\r\n\r\n", 1)[1]
     result = json.loads(response_body)
-    assert result["behavior"] == "deny"
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     await hook_server.stop()
 
@@ -208,8 +208,8 @@ async def test_hook_permission_timeout_denies(hook_server):
     assert b"200" in response
     response_body = response.split(b"\r\n\r\n", 1)[1]
     result = json.loads(response_body)
-    assert result["behavior"] == "deny"
-    assert "timeout" in result.get("message", "").lower()
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "timeout" in result["hookSpecificOutput"].get("permissionDecisionReason", "").lower()
 
     await hook_server.stop()
 

@@ -169,9 +169,10 @@ def install_hooks(port, config_path):
 
     base_url = f"http://localhost:{port}"
     hooks = settings.get("hooks", {})
-    hooks["Stop"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/stop -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}]}]
-    hooks["Notification"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/notification -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}]}]
-    hooks["PreToolUse"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/permission -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}], "matcher": "Bash|Write|Edit"}]
+    # Claude Code passes hook event JSON via stdin to command hooks
+    hooks["Stop"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/stop -H 'Content-Type: application/json' -d @-"}]}]
+    hooks["Notification"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/notification -H 'Content-Type: application/json' -d @-"}]}]
+    hooks["PreToolUse"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/permission -H 'Content-Type: application/json' -d @-", "timeout": 300}], "matcher": "Bash|Write|Edit"}]
     settings["hooks"] = hooks
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
