@@ -152,22 +152,28 @@ class TelegramBot:
             pass  # Non-critical, other instance may have set them
 
     async def _poll_updates(self) -> None:
-        """Custom polling loop that handles Conflict errors silently."""
+        """Custom polling loop that handles Conflict errors silently.
+
+        Multiple machines share the same bot token. Telegram only allows
+        one long-polling getUpdates connection at a time. We use short
+        non-blocking polls (timeout=0) alternating with sleeps so that
+        multiple instances can take turns grabbing updates. Each command
+        handler checks machine_name, so commands are routed correctly.
+        """
         offset = 0
-        conflict_backoff = 5
         while True:
             try:
                 updates = await self._app.bot.get_updates(
-                    offset=offset, timeout=10
+                    offset=offset, timeout=0
                 )
-                conflict_backoff = 5  # Reset on success
                 for update in updates:
                     offset = update.update_id + 1
                     await self._app.process_update(update)
+                # Short sleep between non-blocking polls
+                await asyncio.sleep(2)
             except Conflict:
-                # Another instance is polling — back off silently
-                await asyncio.sleep(conflict_backoff)
-                conflict_backoff = min(conflict_backoff * 2, 60)
+                # Another instance is mid-request — wait and retry
+                await asyncio.sleep(3)
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -220,27 +226,29 @@ class TelegramBot:
             return
 
         args = context.args or []
-        # /status without args: show this machine's status
-        if not args or args[0] == self._machine_name:
-            states = self._state_tracker.get_all_states()
-            if not states:
-                await update.message.reply_text(
-                    f"[{self._machine_name}] No Claude Code sessions found."
-                )
-                return
+        # /status with a different machine name: ignore (not for us)
+        if args and args[0] != self._machine_name:
+            return
 
-            lines = [f"📊 [{self._machine_name}] Status:"]
-            state_icons = {
-                PaneState.WORKING: "🔵",
-                PaneState.IDLE: "🟢",
-                PaneState.NEEDS_INPUT: "🟡",
-                PaneState.PERMISSION: "🔴",
-                PaneState.UNKNOWN: "⚪",
-            }
-            for pane_id, state in states.items():
-                icon = state_icons.get(state, "⚪")
-                lines.append(f"  {icon} {pane_id}: {state.value}")
-            await update.message.reply_text("\n".join(lines))
+        states = self._state_tracker.get_all_states()
+        if not states:
+            await update.message.reply_text(
+                f"[{self._machine_name}] No Claude Code sessions found."
+            )
+            return
+
+        lines = [f"📊 [{self._machine_name}] Status:"]
+        state_icons = {
+            PaneState.WORKING: "🔵",
+            PaneState.IDLE: "🟢",
+            PaneState.NEEDS_INPUT: "🟡",
+            PaneState.PERMISSION: "🔴",
+            PaneState.UNKNOWN: "⚪",
+        }
+        for pane_id, state in states.items():
+            icon = state_icons.get(state, "⚪")
+            lines.append(f"  {icon} {pane_id}: {state.value}")
+        await update.message.reply_text("\n".join(lines))
 
     async def _handle_view(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
