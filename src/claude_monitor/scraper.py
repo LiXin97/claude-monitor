@@ -1,3 +1,4 @@
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -7,6 +8,7 @@ class TmuxPane:
     pane_id: str  # e.g. "copilot-api:1.0"
     command: str  # e.g. "claude"
     pid: int
+    cwd: str = ""  # working directory of the process
     content: str = ""
 
 
@@ -44,6 +46,13 @@ def discover_panes(sessions: list[str] | None = None) -> list[TmuxPane]:
             continue
 
         panes.append(TmuxPane(pane_id=pane_id, command=command, pid=int(pid_str)))
+
+    # Resolve cwd for each pane via /proc
+    for pane in panes:
+        try:
+            pane.cwd = os.readlink(f"/proc/{pane.pid}/cwd")
+        except OSError:
+            pass
 
     return panes
 

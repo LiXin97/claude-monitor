@@ -152,6 +152,8 @@ class TelegramBot:
         self._silence_seconds = notification_silence_seconds
         # Hook server reference (set by Monitor when hooks are enabled)
         self._hook_server = None
+        # cwd → pane_id mapping (updated each poll cycle)
+        self._cwd_to_pane: dict[str, str] = {}
 
     async def initialize(self) -> None:
         self._app = (
@@ -278,11 +280,14 @@ class TelegramBot:
         tool_name: str,
         input_preview: str,
         project: str = "",
+        pane_label: str = "",
     ) -> None:
         """Send a hook permission request with Approve/Deny buttons."""
         if not self._app:
             return
         parts = [f"🔐 {label}Claude Code permission request"]
+        if pane_label:
+            parts.append(f"Session: <code>{escape_html(pane_label)}</code>")
         if project:
             parts.append(f"Project: <code>{escape_html(project)}</code>")
         parts.append(f"Tool: <code>{escape_html(tool_name)}</code>")
@@ -323,6 +328,10 @@ class TelegramBot:
                 self._pane_aliases[pid] = self._next_alias
                 self._alias_to_pane[self._next_alias] = pid
                 self._next_alias += 1
+
+    def update_pane_cwds(self, pane_cwds: dict[str, str]) -> None:
+        """Update the cwd → pane_id mapping (called each poll cycle)."""
+        self._cwd_to_pane = {cwd: pid for pid, cwd in pane_cwds.items()}
 
     def _resolve_pane(self, alias_or_id: str) -> str | None:
         """Resolve a numeric alias or raw pane_id to a pane_id."""
@@ -433,7 +442,10 @@ class TelegramBot:
 
         args = context.args or []
         if not args:
-            await update.message.reply_text("Usage: /view <machine> [pane]")
+            await update.message.reply_text(
+                f"Usage: /view {self._machine_name} [pane_alias]\n"
+                f"Example: /view {self._machine_name} 1"
+            )
             return
 
         target_machine = args[0]
@@ -480,8 +492,9 @@ class TelegramBot:
         parsed = parse_send_command(raw_args)
         if parsed is None:
             await update.message.reply_text(
-                "Usage: /send <machine> <text>\n"
-                "       /send <machine> <alias> <text>"
+                f"Usage: /send {self._machine_name} <text>\n"
+                f"       /send {self._machine_name} <alias> <text>\n"
+                f"Example: /send {self._machine_name} 1 yes"
             )
             return
 

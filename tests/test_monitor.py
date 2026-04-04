@@ -34,6 +34,7 @@ async def test_monitor_single_poll_cycle(config):
         monitor._telegram.send_notification = AsyncMock()
         monitor._telegram.update_waiting_panes = MagicMock()
         monitor._telegram.update_pane_aliases = MagicMock()
+        monitor._telegram.update_pane_cwds = MagicMock()
 
         await monitor._poll_once()
 
@@ -71,6 +72,7 @@ async def test_monitor_sends_notification_on_transition(config):
         monitor._telegram.send_notification = AsyncMock()
         monitor._telegram.update_waiting_panes = MagicMock()
         monitor._telegram.update_pane_aliases = MagicMock()
+        monitor._telegram.update_pane_cwds = MagicMock()
 
         # 2 working polls to establish state
         await monitor._poll_once()
@@ -98,6 +100,7 @@ async def test_monitor_cleans_up_removed_panes(config):
         monitor._telegram.send_notification = AsyncMock()
         monitor._telegram.update_waiting_panes = MagicMock()
         monitor._telegram.update_pane_aliases = MagicMock()
+        monitor._telegram.update_pane_cwds = MagicMock()
 
         # Pane exists
         mock_discover.return_value = [pane]

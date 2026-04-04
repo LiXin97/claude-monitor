@@ -14,6 +14,9 @@ def hook_server():
     telegram.send_notification = AsyncMock()
     telegram.send_message = AsyncMock()
     telegram.send_hook_permission = AsyncMock()
+    telegram._cwd_to_pane = {}
+    telegram._pane_aliases = {}
+    telegram._format_pane_label = MagicMock(return_value="")
     server = HookServer(telegram_bot=telegram, port=0)  # port=0 = random available
     return server
 

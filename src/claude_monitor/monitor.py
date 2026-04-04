@@ -59,6 +59,7 @@ class Monitor:
 
         # Update waiting panes list and aliases
         self._telegram.update_pane_aliases([p.pane_id for p in panes])
+        self._telegram.update_pane_cwds({p.pane_id: p.cwd for p in panes if p.cwd})
         self._telegram.update_waiting_panes(self._state_tracker.get_all_states())
 
     async def run(self) -> None:

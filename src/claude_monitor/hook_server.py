@@ -146,9 +146,17 @@ class HookServer:
         writer.write(header.encode() + payload)
         await writer.drain()
 
+    def _pane_label_for_cwd(self, cwd: str) -> str:
+        """Resolve cwd to a pane label like '1: copilot-api:1.0', or '' if unknown."""
+        pane_id = self._telegram_bot._cwd_to_pane.get(cwd)
+        if pane_id:
+            return self._telegram_bot._format_pane_label(pane_id)
+        return ""
+
     async def _handle_stop(self, body: dict, writer: asyncio.StreamWriter) -> None:
         cwd = body.get("cwd", "")
         project = _project_name(cwd)
+        pane_label = self._pane_label_for_cwd(cwd)
         last_msg = body.get("last_assistant_message", "")
         label = f"[{self._machine_name}] " if self._machine_name else ""
 
@@ -164,10 +172,10 @@ class HookServer:
 
         header = f"🏁 {label}Claude Code turn ended"
         parts = [header]
+        if pane_label:
+            parts.append(f"Session: <code>{pane_label}</code>")
         if project:
             parts.append(f"Project: <code>{project}</code>")
-        if cwd:
-            parts.append(f"CWD: <code>{cwd}</code>")
         if preview:
             parts.append(f"\n{preview}")
         msg = "\n".join(parts)
@@ -180,10 +188,13 @@ class HookServer:
         message = body.get("message", "")
         cwd = body.get("cwd", "")
         project = _project_name(cwd)
+        pane_label = self._pane_label_for_cwd(cwd)
         label = f"[{self._machine_name}] " if self._machine_name else ""
 
         header = f"ℹ️ {label}Claude Code notification"
         parts = [header]
+        if pane_label:
+            parts.append(f"Session: <code>{pane_label}</code>")
         if project:
             parts.append(f"Project: <code>{project}</code>")
         if message:
@@ -200,6 +211,7 @@ class HookServer:
         session_id = body.get("session_id", "unknown")
         cwd = body.get("cwd", "")
         project = _project_name(cwd)
+        pane_label = self._pane_label_for_cwd(cwd)
 
         req_id = uuid.uuid4().hex[:12]
         event = asyncio.Event()
@@ -219,6 +231,7 @@ class HookServer:
             tool_name=tool_name,
             input_preview=input_preview,
             project=project,
+            pane_label=pane_label,
         )
 
         # Block until user responds or timeout
