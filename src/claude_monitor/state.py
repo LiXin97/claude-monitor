@@ -150,7 +150,11 @@ class StateTracker:
     def get_state(self, pane_id: str) -> PaneState:
         if pane_id not in self._panes:
             return PaneState.UNKNOWN
-        return self._panes[pane_id].confirmed_state
+        tracker = self._panes[pane_id]
+        # Return pending state as a best-effort when no confirmed state yet
+        if tracker.confirmed_state == PaneState.UNKNOWN and tracker.pending_state != PaneState.UNKNOWN:
+            return tracker.pending_state
+        return tracker.confirmed_state
 
     def get_all_states(self) -> dict[str, PaneState]:
         return {pid: t.confirmed_state for pid, t in self._panes.items()}
