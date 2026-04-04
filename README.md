@@ -3,13 +3,17 @@
 Monitor [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions running in tmux — get Telegram push notifications when tasks finish or need your input, and send responses right from your phone.
 
 ```
-┌──────────────────────────────┐
-│  Machine (behind NAT)        │
-│                              │
-│  tmux ─► claude-monitor ─────┼──► Telegram Bot API ──► Your Phone
-│  (claude code)          ◄────┼──◄                  ◄──
-│          send-keys           │
-└──────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Machine A (behind NAT)                              │
+│  tmux ─► claude-monitor ──┐                          │
+│  (claude code)       ◄────┤                          │
+└───────────────────────────┤                          │
+                            ├──► Telegram Bot ──► Phone
+┌───────────────────────────┤                          │
+│  Machine B (behind NAT)   │                          │
+│  tmux ─► claude-monitor ──┘                          │
+│  (claude code)       ◄────┘                          │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## Why
@@ -22,19 +26,22 @@ claude-monitor watches your tmux panes, detects when Claude Code changes state, 
 
 - **Auto-discovers** Claude Code sessions in tmux — no manual pane configuration
 - **Push notifications** via Telegram when Claude Code:
-  - Finishes a task (🟢)
-  - Needs your input (🟡)
-  - Asks for permission (🔴)
+  - Finishes a task (🟢 idle)
+  - Needs your input (🟡 needs_input)
+  - Asks for permission (🔴 permission)
+- **Smart filtering** — only notifies on actionable states; ignores transitions to working/unknown
+- **Scheduled task aware** — detects cron monitoring pauses ("Will check again in...") as working, not idle
 - **Remote input** — reply directly from Telegram to send text into the tmux pane
 - **Quick reply** — when only one pane is waiting, just type your message (no commands needed)
 - **Multi-machine** — run on multiple servers with the same Telegram bot, each identified by name
-- **Debounced** — state must be stable for 10s before notifying (no false alarms)
+- **Debounced** — state must be stable for 2 consecutive polls before notifying (no false alarms)
+- **HTML notifications** — formatted messages with bold headers and code blocks in Telegram
 
 ## Telegram Commands
 
 | Command | Description |
 |---------|-------------|
-| `/status` | Show all Claude Code pane states |
+| `/status` | Show all Claude Code pane states across all machines |
 | `/view <machine>` | View last 30 lines of terminal output |
 | `/send <machine> <text>` | Send input to a pane |
 | `/send <machine>:<pane> <text>` | Send to a specific pane |
@@ -127,20 +134,21 @@ machine:
 
 All notifications are prefixed with `[machine-name]`. Commands like `/send` and `/view` route by machine name.
 
-> **Note:** Telegram only allows one bot instance to poll for commands at a time. All machines can send notifications simultaneously, but only one machine will receive commands (e.g., `/send`, `/view`). The library handles this automatically with retries — if one machine stops, another will take over polling.
+Each machine uses non-blocking polls with conflict handling, so all instances can coexist and take turns processing commands. Notifications always work from every machine.
 
 ## How It Works
 
 1. **Scraper** — runs `tmux capture-pane` every 5 seconds on all panes where `pane_current_command == "claude"`
 2. **State machine** — regex patterns detect 4 states from the terminal output:
-   - `working` — tool execution (`● Bash(...)`) or spinners (`✢`, `✽`)
+   - `working` — tool execution (`● Bash(...)`) or spinners (`✢`, `✽`), scheduled task pauses
    - `idle` — prompt (`❯`) visible with completion message (`✻ Worked for ...`)
    - `needs_input` — prompt visible with a question above it
    - `permission` — approval prompt (`Allow?`, `(y/n)`)
 3. **Debounce** — state must be stable for `stable_threshold` consecutive polls before triggering
-4. **Telegram** — sends formatted notification on state transitions, accepts commands via long polling
+4. **Notification filter** — only sends alerts for actionable states (idle, needs_input, permission); transitions to working or unknown are silent
+5. **Telegram** — sends HTML-formatted notifications on state transitions, accepts commands via non-blocking polling
 
-No inbound ports needed — Telegram uses outbound HTTPS polling. Works behind NAT/firewalls.
+No inbound ports needed — all communication uses outbound HTTPS. Works behind NAT/firewalls.
 
 ## CLI Reference
 
