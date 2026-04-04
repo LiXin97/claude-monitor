@@ -115,7 +115,7 @@ class TelegramBot:
         self._machine_name = machine_name
         self._state_tracker = state_tracker
         self._app: Application | None = None
-        self._polling = False
+        self._poll_task: asyncio.Task | None = None
         # Track which panes are awaiting input (for quick reply)
         self._waiting_panes: list[str] = []
 
@@ -135,22 +135,10 @@ class TelegramBot:
         await self._app.initialize()
         await self._app.start()
 
-        # Try to claim polling. Telegram only allows one getUpdates connection
-        # per bot token. If another machine is already polling, we get 409 Conflict.
-        # In that case, fall back to send-only mode (notifications still work).
-        try:
-            # Probe with a quick non-blocking getUpdates to check for conflict
-            await self._app.bot.get_updates(timeout=0)
-            # No conflict — start polling for commands
-            await self._app.updater.start_polling(drop_pending_updates=True)
-            self._polling = True
-            logger.info("Polling for commands (this machine handles Telegram commands)")
-        except Conflict:
-            self._polling = False
-            logger.info(
-                "Another instance is polling — running in send-only mode "
-                "(notifications work, commands handled by other instance)"
-            )
+        # Start our own polling loop instead of the library's start_polling().
+        # This lets us catch Conflict errors (409) silently when another
+        # machine is already polling the same bot token.
+        self._poll_task = asyncio.create_task(self._poll_updates())
 
         # Set bot menu commands
         try:
@@ -163,10 +151,37 @@ class TelegramBot:
         except Exception:
             pass  # Non-critical, other instance may have set them
 
+    async def _poll_updates(self) -> None:
+        """Custom polling loop that handles Conflict errors silently."""
+        offset = 0
+        conflict_backoff = 5
+        while True:
+            try:
+                updates = await self._app.bot.get_updates(
+                    offset=offset, timeout=10
+                )
+                conflict_backoff = 5  # Reset on success
+                for update in updates:
+                    offset = update.update_id + 1
+                    await self._app.process_update(update)
+            except Conflict:
+                # Another instance is polling — back off silently
+                await asyncio.sleep(conflict_backoff)
+                conflict_backoff = min(conflict_backoff * 2, 60)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.error("Polling error: %s", e)
+                await asyncio.sleep(5)
+
     async def shutdown(self) -> None:
         if self._app:
-            if self._polling:
-                await self._app.updater.stop()
+            if self._poll_task:
+                self._poll_task.cancel()
+                try:
+                    await self._poll_task
+                except asyncio.CancelledError:
+                    pass
             await self._app.stop()
             await self._app.shutdown()
 
