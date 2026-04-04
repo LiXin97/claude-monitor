@@ -11,6 +11,9 @@ class PaneState(Enum):
     PERMISSION = "permission"
 
 
+ACTIONABLE_STATES = (PaneState.IDLE, PaneState.NEEDS_INPUT, PaneState.PERMISSION)
+
+
 @dataclass
 class StateTransition:
     pane_id: str
@@ -19,106 +22,90 @@ class StateTransition:
     content: str
 
 
+# Pre-compiled regex patterns for state detection
+_PERMISSION_PATTERNS = [
+    re.compile(r"Allow\?"),
+    re.compile(r"Allow this command\?"),
+    re.compile(r"Press Enter to approve"),
+    re.compile(r"\(y/n\)"),
+    re.compile(r"Allow .+\?"),
+]
+
+_WORKING_PATTERNS = [
+    re.compile(r"^● \w+\(.*\)", re.MULTILINE),
+    re.compile(r"^[✢✽] ", re.MULTILINE),
+    re.compile(r"Running \d+ agents"),
+    re.compile(r"✻ Running scheduled task"),
+    re.compile(r"Will check again in"),
+]
+
+_TIMING_PATTERN = re.compile(r"\(\d+[ms]\s+\d+s\s*·")
+
+_PROMPT_PATTERN = re.compile(r"^❯\s*$", re.MULTILINE)
+
+_QUESTION_PATTERNS = [
+    re.compile(r"\?\s*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Which .+ should", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Does this .+ look", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Should I", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Do you want", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"checkpoint", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Proceed\?", re.MULTILINE | re.IGNORECASE),
+]
+
+
+def _has_working_indicator(text: str) -> bool:
+    """Check if text contains any working indicator pattern."""
+    for pattern in _WORKING_PATTERNS:
+        if pattern.search(text):
+            return True
+    return bool(_TIMING_PATTERN.search(text))
+
+
+def _find_prompt_idx(lines: list[str]) -> int | None:
+    """Find the index of the last ❯ prompt line."""
+    for i in range(len(lines) - 1, -1, -1):
+        if re.match(r"^❯\s*$", lines[i]):
+            return i
+    return None
+
+
 def detect_state(content: str) -> PaneState:
     """Detect Claude Code state from captured tmux pane content."""
     if not content.strip():
         return PaneState.UNKNOWN
 
     lines = content.strip().splitlines()
-    last_lines = lines[-15:]  # Look at last 15 lines for patterns
+    last_lines = lines[-15:]
     last_text = "\n".join(last_lines)
 
-    # Check for permission prompts first (highest priority)
-    permission_patterns = [
-        r"Allow\?",
-        r"Allow this command\?",
-        r"Press Enter to approve",
-        r"\(y/n\)",
-        r"Allow .+\?",
-    ]
-    for pattern in permission_patterns:
-        if re.search(pattern, last_text):
+    # Permission prompts (highest priority)
+    for pattern in _PERMISSION_PATTERNS:
+        if pattern.search(last_text):
             return PaneState.PERMISSION
 
-    # Check for active work indicators (spinners, tool execution)
-    working_patterns = [
-        r"^● \w+\(.*\)",          # Tool execution: ● Bash(...), ● Agent(...)
-        r"^[✢✽] ",                # Active spinners: ✢ Verifying..., ✽ Building...
-        r"Running \d+ agents",
-        r"✻ Running scheduled task",  # Cron task active
-        r"Will check again in",       # Monitoring pause between cron checks
-    ]
+    has_prompt = bool(_PROMPT_PATTERN.search(last_text))
+    has_working = _has_working_indicator(last_text)
 
-    # Task panel indicators (only count as working if combined with spinner)
-    task_panel_pattern = r"^[◻◼] "
-
-    has_prompt = bool(re.search(r"^❯\s*$", last_text, re.MULTILINE))
-
-    # Check for working indicators anywhere in the last lines
-    has_working_indicator = False
-    for pattern in working_patterns:
-        if re.search(pattern, last_text, re.MULTILINE):
-            has_working_indicator = True
-            break
-
-    # Also detect working by spinner with timing pattern: "... (5m 41s · ↓ 8.6k tokens)"
-    if re.search(r"\(\d+[ms]\s+\d+s\s*·", last_text):
-        has_working_indicator = True
-
-    # If there's a spinner/working indicator AND prompt visible, check if the
-    # spinner is ABOVE the prompt (Claude Code shows prompt at bottom while working)
-    if has_working_indicator and has_prompt:
-        # Find the prompt position
-        prompt_idx = None
-        for i in range(len(last_lines) - 1, -1, -1):
-            if re.match(r"^❯\s*$", last_lines[i]):
-                prompt_idx = i
-                break
-
+    # Working indicator + prompt: check if indicator is ABOVE the prompt
+    if has_working and has_prompt:
+        prompt_idx = _find_prompt_idx(last_lines)
         if prompt_idx is not None:
             above_prompt = "\n".join(last_lines[:prompt_idx])
-            # If there's a spinner or active task indicator above the prompt,
-            # Claude Code is working (prompt visible but waiting for sub-agent)
-            for pattern in working_patterns:
-                if re.search(pattern, above_prompt, re.MULTILINE):
-                    return PaneState.WORKING
-            if re.search(r"\(\d+[ms]\s+\d+s\s*·", above_prompt):
+            if _has_working_indicator(above_prompt):
                 return PaneState.WORKING
 
-    # No prompt visible + working indicator = definitely working
-    if not has_prompt and has_working_indicator:
+    # No prompt + working indicator = definitely working
+    if not has_prompt and has_working:
         return PaneState.WORKING
 
-    # Check for prompt (❯) — indicates idle or needs_input
+    # Prompt visible — idle or needs_input
     if has_prompt:
-        # Find content above the last ❯ prompt
-        prompt_idx = None
-        for i in range(len(last_lines) - 1, -1, -1):
-            if re.match(r"^❯\s*$", last_lines[i]):
-                prompt_idx = i
-                break
-
+        prompt_idx = _find_prompt_idx(last_lines)
         if prompt_idx is not None:
             above_prompt = "\n".join(last_lines[:prompt_idx])
-
-            # Check for question-like content above prompt
-            question_patterns = [
-                r"\?\s*$",            # Line ending with ?
-                r"Which .+ should",   # Choice question
-                r"Does this .+ look",
-                r"Should I",
-                r"Do you want",
-                r"checkpoint",
-                r"Proceed\?",
-            ]
-            has_question = any(
-                re.search(p, above_prompt, re.MULTILINE | re.IGNORECASE)
-                for p in question_patterns
-            )
-
-            if has_question:
+            if any(p.search(above_prompt) for p in _QUESTION_PATTERNS):
                 return PaneState.NEEDS_INPUT
-
             return PaneState.IDLE
 
     return PaneState.UNKNOWN

@@ -70,9 +70,8 @@ class Monitor:
 
         # Send startup message
         try:
-            await self._telegram._app.bot.send_message(
-                chat_id=self._config.telegram_chat_id,
-                text=f"🚀 [{self._config.machine_name}] Claude Monitor started",
+            await self._telegram.send_message(
+                f"🚀 [{self._config.machine_name}] Claude Monitor started"
             )
         except Exception as e:
             logger.error("Failed to send startup message: %s", e)
@@ -86,9 +85,8 @@ class Monitor:
                 await asyncio.sleep(self._config.poll_interval)
         finally:
             try:
-                await self._telegram._app.bot.send_message(
-                    chat_id=self._config.telegram_chat_id,
-                    text=f"🛑 [{self._config.machine_name}] Claude Monitor stopped",
+                await self._telegram.send_message(
+                    f"🛑 [{self._config.machine_name}] Claude Monitor stopped"
                 )
             except Exception:
                 pass

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from html import escape as escape_html
 
 from telegram import BotCommand, Update
 from telegram.error import Conflict
@@ -18,10 +18,19 @@ from claude_monitor.scraper import capture_pane, send_keys
 
 logger = logging.getLogger(__name__)
 
+STATE_ICONS = {
+    PaneState.WORKING: "🔵",
+    PaneState.IDLE: "🟢",
+    PaneState.NEEDS_INPUT: "🟡",
+    PaneState.PERMISSION: "🔴",
+    PaneState.UNKNOWN: "⚪",
+}
 
-def _escape_html(text: str) -> str:
-    """Escape HTML special characters for Telegram HTML parse mode."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+_NOTIFICATION_HEADERS = {
+    PaneState.IDLE: ("🟢", "Claude Code finished task"),
+    PaneState.NEEDS_INPUT: ("🟡", "Claude Code waiting for input"),
+    PaneState.PERMISSION: ("🔴", "Claude Code asking permission"),
+}
 
 
 def extract_context_lines(content: str, max_lines: int = 10) -> list[str]:
@@ -51,19 +60,16 @@ def format_notification(machine_name: str, transition: StateTransition) -> str:
     context = extract_context_lines(transition.content, max_lines=15)
     context_text = "\n".join(context)
 
-    if transition.new_state == PaneState.IDLE:
-        header = f"🟢 <b>[{machine_name}] Claude Code finished task</b>"
-    elif transition.new_state == PaneState.NEEDS_INPUT:
-        header = f"🟡 <b>[{machine_name}] Claude Code waiting for input</b>"
-    elif transition.new_state == PaneState.PERMISSION:
-        header = f"🔴 <b>[{machine_name}] Claude Code asking permission</b>"
-    else:
-        header = f"ℹ️ <b>[{machine_name}] State → {transition.new_state.value}</b>"
+    icon, msg = _NOTIFICATION_HEADERS.get(
+        transition.new_state,
+        ("ℹ️", f"State → {transition.new_state.value}"),
+    )
+    header = f"{icon} <b>[{machine_name}] {msg}</b>"
 
     return (
         f"{header}\n"
         f"Session: <code>{transition.pane_id}</code>\n\n"
-        f"<pre>{_escape_html(context_text)}</pre>"
+        f"<pre>{escape_html(context_text)}</pre>"
     )
 
 
@@ -148,27 +154,17 @@ class TelegramBot:
             pass  # Non-critical, other instance may have set them
 
     async def _poll_updates(self) -> None:
-        """Custom polling loop that handles Conflict errors silently.
-
-        Multiple machines share the same bot token. Telegram only allows
-        one long-polling getUpdates connection at a time. We use short
-        non-blocking polls (timeout=0) alternating with sleeps so that
-        multiple instances can take turns grabbing updates. Each command
-        handler checks machine_name, so commands are routed correctly.
-        """
+        """Poll for updates with conflict handling for multi-instance sharing."""
         offset = 0
         while True:
             try:
                 updates = await self._app.bot.get_updates(
-                    offset=offset, timeout=0
+                    offset=offset, timeout=2
                 )
                 for update in updates:
                     offset = update.update_id + 1
                     await self._app.process_update(update)
-                # Short sleep between non-blocking polls
-                await asyncio.sleep(2)
             except Conflict:
-                # Another instance is mid-request — wait and retry
                 await asyncio.sleep(3)
             except asyncio.CancelledError:
                 return
@@ -193,6 +189,11 @@ class TelegramBot:
             and update.effective_chat.id == self._chat_id
         )
 
+    async def send_message(self, text: str) -> None:
+        """Send a plain text message to the configured chat."""
+        if self._app:
+            await self._app.bot.send_message(chat_id=self._chat_id, text=text)
+
     async def send_notification(self, transition: StateTransition) -> None:
         """Send a notification message for a state transition."""
         if not self._app:
@@ -201,14 +202,6 @@ class TelegramBot:
         await self._app.bot.send_message(
             chat_id=self._chat_id, text=msg, parse_mode="HTML"
         )
-
-        # Track waiting panes for quick reply
-        if transition.new_state in (PaneState.NEEDS_INPUT, PaneState.PERMISSION):
-            if transition.pane_id not in self._waiting_panes:
-                self._waiting_panes.append(transition.pane_id)
-        else:
-            if transition.pane_id in self._waiting_panes:
-                self._waiting_panes.remove(transition.pane_id)
 
     def update_waiting_panes(self, pane_states: dict[str, PaneState]) -> None:
         """Update the list of panes waiting for input."""
@@ -236,15 +229,8 @@ class TelegramBot:
             return
 
         lines = [f"📊 [{self._machine_name}] Status:"]
-        state_icons = {
-            PaneState.WORKING: "🔵",
-            PaneState.IDLE: "🟢",
-            PaneState.NEEDS_INPUT: "🟡",
-            PaneState.PERMISSION: "🔴",
-            PaneState.UNKNOWN: "⚪",
-        }
         for pane_id, state in states.items():
-            icon = state_icons.get(state, "⚪")
+            icon = STATE_ICONS.get(state, "⚪")
             lines.append(f"  {icon} {pane_id}: {state.value}")
         await update.message.reply_text("\n".join(lines))
 
