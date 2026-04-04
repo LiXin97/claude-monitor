@@ -353,15 +353,21 @@ class TelegramBot:
         if action == "approve":
             ok = send_keys(pane_id, "y")
             status = "✅ Approved" if ok else "❌ Failed to approve"
-            await query.edit_message_text(
-                text=query.message.text + f"\n\n{status}", parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text=query.message.text_html + f"\n\n{status}", parse_mode="HTML"
+                )
+            except Exception:
+                pass
         elif action == "deny":
             ok = send_keys(pane_id, "n")
             status = "❌ Denied" if ok else "❌ Failed to deny"
-            await query.edit_message_text(
-                text=query.message.text + f"\n\n{status}", parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text=query.message.text_html + f"\n\n{status}", parse_mode="HTML"
+                )
+            except Exception:
+                pass
         elif action == "view":
             content = capture_pane(pane_id, context_lines=30)
             if content:
@@ -375,14 +381,20 @@ class TelegramBot:
                 await query.message.reply_text(f"Could not capture pane {pane_id}")
         elif action == "hook_approve" and self._hook_server:
             self._hook_server.resolve_permission(pane_id, allow=True)
-            await query.edit_message_text(
-                text=query.message.text + "\n\n✅ Allowed", parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text=query.message.text_html + "\n\n✅ Allowed", parse_mode="HTML"
+                )
+            except Exception:
+                pass
         elif action == "hook_deny" and self._hook_server:
             self._hook_server.resolve_permission(pane_id, allow=False)
-            await query.edit_message_text(
-                text=query.message.text + "\n\n❌ Denied", parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text=query.message.text_html + "\n\n❌ Denied", parse_mode="HTML"
+                )
+            except Exception:
+                pass
 
     async def _handle_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE

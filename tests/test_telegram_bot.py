@@ -272,6 +272,7 @@ async def test_callback_approve_sends_y_to_pane():
     query.data = "approve:work:0.0"
     query.message = AsyncMock()
     query.message.text = "Some notification text"
+    query.message.text_html = "Some notification text"
 
     update = MagicMock()
     update.callback_query = query
@@ -295,6 +296,7 @@ async def test_callback_deny_sends_n_to_pane():
     query.data = "deny:work:0.0"
     query.message = AsyncMock()
     query.message.text = "Some notification text"
+    query.message.text_html = "Some notification text"
 
     update = MagicMock()
     update.callback_query = query

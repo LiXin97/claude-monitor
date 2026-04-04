@@ -172,7 +172,9 @@ def install_hooks(port, config_path):
     # Claude Code passes hook event JSON via stdin to command hooks
     hooks["Stop"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/stop -H 'Content-Type: application/json' -d @-"}]}]
     hooks["Notification"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/notification -H 'Content-Type: application/json' -d @-"}]}]
-    hooks["PreToolUse"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/permission -H 'Content-Type: application/json' -d @-", "timeout": 300}], "matcher": "Bash|Write|Edit"}]
+    # PreToolUse hook is NOT installed by default — it blocks Claude until
+    # the user approves via Telegram, which is disruptive for most workflows.
+    # To enable it, manually add a PreToolUse entry in settings.json.
     settings["hooks"] = hooks
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
