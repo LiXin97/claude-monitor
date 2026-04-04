@@ -5,7 +5,7 @@ import re
 from html import escape as escape_html
 
 from telegram import BotCommand, Update
-from telegram.error import Conflict
+from telegram.error import Conflict, TimedOut
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -185,8 +185,8 @@ class TelegramBot:
                 for update in updates:
                     offset = update.update_id + 1
                     await self._app.process_update(update)
-            except Conflict:
-                pass  # Another instance grabbed this poll, try again next cycle
+            except (Conflict, TimedOut):
+                pass  # Expected in multi-instance setup, retry next cycle
             except asyncio.CancelledError:
                 return
             except Exception as e:
