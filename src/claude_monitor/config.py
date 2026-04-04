@@ -18,6 +18,8 @@ class Config:
     context_lines: int = 30
     sessions: list[str] = field(default_factory=list)
     notification_silence_seconds: int = 300
+    hooks_enabled: bool = False
+    hook_server_port: int = 9876
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".claude-monitor" / "config.yaml"
@@ -60,4 +62,6 @@ def load_config(path: str | None = None) -> Config:
         context_lines=int(monitor.get("context_lines", 30)),
         sessions=raw.get("sessions", []),
         notification_silence_seconds=int(monitor.get("notification_silence_seconds", 300)),
+        hooks_enabled=bool(monitor.get("hooks_enabled", False)),
+        hook_server_port=int(monitor.get("hook_server_port", 9876)),
     )

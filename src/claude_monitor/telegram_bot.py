@@ -150,6 +150,8 @@ class TelegramBot:
         # Smart Silence: suppress notifications when user recently interacted
         self._last_interaction: float = 0.0
         self._silence_seconds = notification_silence_seconds
+        # Hook server reference (set by Monitor when hooks are enabled)
+        self._hook_server = None
 
     async def initialize(self) -> None:
         self._app = (
@@ -267,6 +269,33 @@ class TelegramBot:
             return False
         return (time.time() - self._last_interaction) < self._silence_seconds
 
+    async def send_hook_permission(
+        self,
+        request_id: str,
+        label: str,
+        tool_name: str,
+        input_preview: str,
+        session_id: str,
+    ) -> None:
+        """Send a hook permission request with Approve/Deny buttons."""
+        if not self._app:
+            return
+        msg = (
+            f"🔐 {label}Claude Code permission request\n"
+            f"Tool: <code>{escape_html(tool_name)}</code>\n"
+            f"Session: <code>{session_id}</code>\n\n"
+            f"<pre>{escape_html(input_preview)}</pre>"
+        )
+        keyboard = [[
+            InlineKeyboardButton("✅ Allow", callback_data=f"hook_approve:{request_id}"),
+            InlineKeyboardButton("❌ Deny", callback_data=f"hook_deny:{request_id}"),
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await self._app.bot.send_message(
+            chat_id=self._chat_id, text=msg, parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+
     def update_waiting_panes(self, pane_states: dict[str, PaneState]) -> None:
         """Update the list of panes waiting for input."""
         self._waiting_panes = [
@@ -344,6 +373,16 @@ class TelegramBot:
                 )
             else:
                 await query.message.reply_text(f"Could not capture pane {pane_id}")
+        elif action == "hook_approve" and self._hook_server:
+            self._hook_server.resolve_permission(pane_id, allow=True)
+            await query.edit_message_text(
+                text=query.message.text + "\n\n✅ Allowed", parse_mode="HTML"
+            )
+        elif action == "hook_deny" and self._hook_server:
+            self._hook_server.resolve_permission(pane_id, allow=False)
+            await query.edit_message_text(
+                text=query.message.text + "\n\n❌ Denied", parse_mode="HTML"
+            )
 
     async def _handle_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE

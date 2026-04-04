@@ -3,6 +3,7 @@ import logging
 import signal
 
 from claude_monitor.config import Config
+from claude_monitor.hook_server import HookServer
 from claude_monitor.scraper import discover_panes, capture_pane
 from claude_monitor.state import StateTracker
 from claude_monitor.telegram_bot import TelegramBot
@@ -25,6 +26,7 @@ class Monitor:
         )
         self._running = False
         self._known_panes: set[str] = set()
+        self._hook_server: HookServer | None = None
 
     async def _poll_once(self) -> None:
         """Run one poll cycle."""
@@ -70,6 +72,17 @@ class Monitor:
 
         await self._telegram.initialize()
 
+        # Start hook server if enabled
+        if self._config.hooks_enabled:
+            self._hook_server = HookServer(
+                telegram_bot=self._telegram,
+                port=self._config.hook_server_port,
+                machine_name=self._config.machine_name,
+            )
+            self._telegram._hook_server = self._hook_server
+            await self._hook_server.start()
+            logger.info("Hook server started on port %d", self._hook_server.port)
+
         # Send startup message
         try:
             await self._telegram.send_message(
@@ -92,6 +105,8 @@ class Monitor:
                 )
             except Exception:
                 pass
+            if self._hook_server:
+                await self._hook_server.stop()
             await self._telegram.shutdown()
 
     def stop(self) -> None:

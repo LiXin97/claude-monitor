@@ -377,3 +377,76 @@ def test_silence_disabled_when_zero():
 def test_silence_no_interaction_yet():
     bot = TelegramBot("token", 123, "test", StateTracker(), notification_silence_seconds=300)
     assert bot._should_suppress_notification() is False
+
+
+# --- Hook permission button tests ---
+
+@pytest.mark.asyncio
+async def test_send_hook_permission_sends_message_with_buttons():
+    """send_hook_permission sends an Allow/Deny message."""
+    from telegram import InlineKeyboardMarkup
+
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+    bot._app = MagicMock()
+    bot._app.bot.send_message = AsyncMock()
+
+    await bot.send_hook_permission(
+        request_id="abc123",
+        label="[test] ",
+        tool_name="Bash",
+        input_preview='{"command": "ls"}',
+        session_id="session-1",
+    )
+
+    bot._app.bot.send_message.assert_called_once()
+    call_kwargs = bot._app.bot.send_message.call_args
+    reply_markup = call_kwargs.kwargs.get("reply_markup") or call_kwargs[1].get("reply_markup")
+    assert isinstance(reply_markup, InlineKeyboardMarkup)
+    buttons = reply_markup.inline_keyboard[0]
+    assert len(buttons) == 2
+    assert "Allow" in buttons[0].text
+    assert "Deny" in buttons[1].text
+    assert buttons[0].callback_data == "hook_approve:abc123"
+    assert buttons[1].callback_data == "hook_deny:abc123"
+
+
+@pytest.mark.asyncio
+async def test_callback_hook_approve_resolves_permission():
+    """hook_approve button resolves the permission request."""
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+    mock_hook_server = MagicMock()
+    bot._hook_server = mock_hook_server
+
+    query = AsyncMock()
+    query.data = "hook_approve:req123"
+    query.message = AsyncMock()
+    query.message.text = "Permission request text"
+
+    update = MagicMock()
+    update.callback_query = query
+
+    await bot._handle_button_press(update, MagicMock())
+
+    mock_hook_server.resolve_permission.assert_called_once_with("req123", allow=True)
+    query.edit_message_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_hook_deny_resolves_permission():
+    """hook_deny button resolves the permission request as denied."""
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+    mock_hook_server = MagicMock()
+    bot._hook_server = mock_hook_server
+
+    query = AsyncMock()
+    query.data = "hook_deny:req456"
+    query.message = AsyncMock()
+    query.message.text = "Permission request text"
+
+    update = MagicMock()
+    update.callback_query = query
+
+    await bot._handle_button_press(update, MagicMock())
+
+    mock_hook_server.resolve_permission.assert_called_once_with("req456", allow=False)
+    query.edit_message_text.assert_called_once()

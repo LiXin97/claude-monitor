@@ -148,3 +148,53 @@ def stop():
         click.echo("✅ Claude Monitor stopped.")
     except sp.CalledProcessError:
         click.echo("Service is not running or not installed.", err=True)
+
+
+@main.command("install-hooks")
+@click.option("--port", default=9876, help="Hook server port")
+@click.option("--config", "-c", "config_path", default=None, help="Config file path")
+def install_hooks(port, config_path):
+    """Configure Claude Code hooks to send events to claude-monitor."""
+    import json
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+
+    # Load existing settings or start fresh
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    base_url = f"http://localhost:{port}"
+    hooks = settings.get("hooks", {})
+    hooks["Stop"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/stop -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}]}]
+    hooks["Notification"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/notification -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}]}]
+    hooks["PreToolUse"] = [{"hooks": [{"type": "command", "command": f"curl -s -X POST {base_url}/hook/permission -H 'Content-Type: application/json' -d '$CLAUDE_HOOK_EVENT'"}], "matcher": "Bash|Write|Edit"}]
+    settings["hooks"] = hooks
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+    click.echo(f"✅ Hooks configured in {settings_path}")
+    click.echo(f"   Hook server URL: {base_url}")
+    click.echo(f"\n   Make sure to enable hooks in your config:")
+    click.echo(f"   monitor:")
+    click.echo(f"     hooks_enabled: true")
+    click.echo(f"     hook_server_port: {port}")
+
+    # Also enable hooks in monitor config if possible
+    try:
+        cfg_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                config = yaml.safe_load(f) or {}
+            monitor = config.setdefault("monitor", {})
+            monitor["hooks_enabled"] = True
+            monitor["hook_server_port"] = port
+            with open(cfg_path, "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
+            click.echo(f"\n   ✅ Also updated {cfg_path}")
+    except Exception as e:
+        click.echo(f"\n   ⚠️  Could not update monitor config: {e}")
