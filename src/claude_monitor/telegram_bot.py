@@ -1,8 +1,10 @@
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
 
 from telegram import BotCommand, Update
+from telegram.error import Conflict
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -113,6 +115,7 @@ class TelegramBot:
         self._machine_name = machine_name
         self._state_tracker = state_tracker
         self._app: Application | None = None
+        self._polling = False
         # Track which panes are awaiting input (for quick reply)
         self._waiting_panes: list[str] = []
 
@@ -132,13 +135,22 @@ class TelegramBot:
         await self._app.initialize()
         await self._app.start()
 
-        # Start polling with conflict handling for multi-machine setups.
-        # Telegram only allows one getUpdates connection per bot token.
-        # If another instance is already polling, we'll get 409 Conflict.
-        # We still start polling — the library retries automatically, and
-        # whichever instance currently holds the poll handles commands.
-        # Notifications (send_message) always work regardless of who polls.
-        await self._app.updater.start_polling(drop_pending_updates=True)
+        # Try to claim polling. Telegram only allows one getUpdates connection
+        # per bot token. If another machine is already polling, we get 409 Conflict.
+        # In that case, fall back to send-only mode (notifications still work).
+        try:
+            # Probe with a quick non-blocking getUpdates to check for conflict
+            await self._app.bot.get_updates(timeout=0)
+            # No conflict — start polling for commands
+            await self._app.updater.start_polling(drop_pending_updates=True)
+            self._polling = True
+            logger.info("Polling for commands (this machine handles Telegram commands)")
+        except Conflict:
+            self._polling = False
+            logger.info(
+                "Another instance is polling — running in send-only mode "
+                "(notifications work, commands handled by other instance)"
+            )
 
         # Set bot menu commands
         try:
@@ -153,7 +165,8 @@ class TelegramBot:
 
     async def shutdown(self) -> None:
         if self._app:
-            await self._app.updater.stop()
+            if self._polling:
+                await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
 
