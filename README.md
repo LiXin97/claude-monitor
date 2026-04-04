@@ -45,13 +45,13 @@ When exactly one pane is waiting for input, just type your message directly — 
 ## Install
 
 ```bash
-pip install git+https://github.com/xinnzhao/claude-monitor.git
+pip install git+https://github.com/LiXin97/claude-monitor.git
 ```
 
 Or clone and install locally:
 
 ```bash
-git clone https://github.com/xinnzhao/claude-monitor.git
+git clone https://github.com/LiXin97/claude-monitor.git
 cd claude-monitor
 pip install -e .
 ```
