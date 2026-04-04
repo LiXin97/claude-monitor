@@ -194,6 +194,18 @@ def test_tracker_get_state():
     assert tracker.get_state("pane1") == PaneState.WORKING
 
 
+def test_tracker_no_notification_to_working():
+    """Transition to working should NOT send a notification."""
+    tracker = StateTracker(stable_threshold=2)
+    # Become stable in idle
+    tracker.update("pane1", IDLE_SCREEN)
+    tracker.update("pane1", IDLE_SCREEN)
+    # Transition to working (2 polls)
+    tracker.update("pane1", WORKING_SCREEN)
+    t = tracker.update("pane1", WORKING_SCREEN)
+    assert t is None  # No notification for going to working
+
+
 def test_tracker_remove_pane():
     tracker = StateTracker(stable_threshold=2)
     tracker.update("pane1", WORKING_SCREEN)

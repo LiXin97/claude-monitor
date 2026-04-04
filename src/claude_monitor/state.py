@@ -163,8 +163,18 @@ class StateTracker:
                 tracker.confirmed_state = tracker.pending_state
                 tracker.notified = False
 
-                # Only notify on meaningful transitions (not from UNKNOWN)
-                if old_state != PaneState.UNKNOWN:
+                # Only notify on meaningful transitions:
+                # - Not from UNKNOWN (initial state)
+                # - Only when new state needs user attention (idle, needs_input, permission)
+                # - Skip transitions to working/unknown (not actionable)
+                if (
+                    old_state != PaneState.UNKNOWN
+                    and tracker.confirmed_state in (
+                        PaneState.IDLE,
+                        PaneState.NEEDS_INPUT,
+                        PaneState.PERMISSION,
+                    )
+                ):
                     tracker.notified = True
                     return StateTransition(
                         pane_id=pane_id,
