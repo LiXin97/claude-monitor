@@ -127,6 +127,26 @@ def test_detect_working_scheduled_task_pause():
     assert detect_state(SCHEDULED_TASK_PAUSE) == PaneState.WORKING
 
 
+# Working state where tmux renders ✢ as · (middle dot U+00B7)
+WORKING_MIDDLE_DOT = """\
+● Bash(for i in $(seq 1 20); do sleep 120;...)
+  ⎿  [1/20] Retest: 30/200 | Debates: 20/1000
+     (2m 5s · timeout 10m)
+
+· Running Block 0.1 retest… (1h 3m 38s · ↓ 4.6k tokens)
+  ⎿  ◼ Run Block 0.1 retest for ICC computation
+
+──────────────────────────────────────────────────────
+❯\xa0
+──────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on"""
+
+
+def test_detect_working_middle_dot_spinner():
+    """tmux sometimes renders ✢ as · (middle dot) — must still detect WORKING."""
+    assert detect_state(WORKING_MIDDLE_DOT) == PaneState.WORKING
+
+
 # --- StateTracker tests ---
 
 

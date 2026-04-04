@@ -33,13 +33,15 @@ _PERMISSION_PATTERNS = [
 
 _WORKING_PATTERNS = [
     re.compile(r"^● \w+\(.*\)", re.MULTILINE),
-    re.compile(r"^[✢✽] ", re.MULTILINE),
+    re.compile(r"^[✢✽·] ", re.MULTILINE),  # · is tmux rendering of ✢
     re.compile(r"Running \d+ agents"),
     re.compile(r"✻ Running scheduled task"),
     re.compile(r"Will check again in"),
+    re.compile(r"Running…"),
+    re.compile(r"↓ [\d.]+k tokens"),
 ]
 
-_TIMING_PATTERN = re.compile(r"\(\d+[ms]\s+\d+s\s*·")
+_TIMING_PATTERN = re.compile(r"\(\d+[hms]\s+\d+[hms].*?·")
 
 _PROMPT_PATTERN = re.compile(r"^❯\s*$", re.MULTILINE)
 
