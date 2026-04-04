@@ -1,11 +1,14 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from claude_monitor.telegram_bot import (
     format_notification,
     parse_send_command,
     extract_context_lines,
+    extract_pane_from_notification,
     TelegramBot,
 )
-from claude_monitor.state import PaneState, StateTransition
+from claude_monitor.state import PaneState, StateTransition, StateTracker
 
 
 IDLE_CONTENT = """\
@@ -194,3 +197,183 @@ def test_format_pane_label():
     bot.update_pane_aliases(["work:0.0"])
     assert bot._format_pane_label("work:0.0") == "1: work:0.0"
     assert bot._format_pane_label("unknown:0.0") == "unknown:0.0"
+
+
+# --- Inline button tests ---
+
+def test_notification_permission_has_approve_deny_buttons():
+    """PERMISSION notification includes Approve/Deny inline buttons."""
+    from telegram import InlineKeyboardMarkup
+
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+    bot._app = MagicMock()
+    bot._app.bot.send_message = AsyncMock()
+
+    transition = StateTransition(
+        pane_id="work:0.0",
+        old_state=PaneState.WORKING,
+        new_state=PaneState.PERMISSION,
+        content=PERMISSION_CONTENT,
+    )
+
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(bot.send_notification(transition))
+
+    bot._app.bot.send_message.assert_called_once()
+    call_kwargs = bot._app.bot.send_message.call_args
+    reply_markup = call_kwargs.kwargs.get("reply_markup") or call_kwargs[1].get("reply_markup")
+    assert reply_markup is not None
+    assert isinstance(reply_markup, InlineKeyboardMarkup)
+
+    buttons = reply_markup.inline_keyboard[0]
+    assert len(buttons) == 2
+    assert "Approve" in buttons[0].text
+    assert "Deny" in buttons[1].text
+    assert buttons[0].callback_data == "approve:work:0.0"
+    assert buttons[1].callback_data == "deny:work:0.0"
+
+
+def test_notification_idle_has_view_button():
+    """IDLE notification includes a View inline button."""
+    from telegram import InlineKeyboardMarkup
+
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+    bot._app = MagicMock()
+    bot._app.bot.send_message = AsyncMock()
+
+    transition = StateTransition(
+        pane_id="work:0.0",
+        old_state=PaneState.WORKING,
+        new_state=PaneState.IDLE,
+        content=IDLE_CONTENT,
+    )
+
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(bot.send_notification(transition))
+
+    bot._app.bot.send_message.assert_called_once()
+    call_kwargs = bot._app.bot.send_message.call_args
+    reply_markup = call_kwargs.kwargs.get("reply_markup") or call_kwargs[1].get("reply_markup")
+    assert reply_markup is not None
+    assert isinstance(reply_markup, InlineKeyboardMarkup)
+
+    buttons = reply_markup.inline_keyboard[0]
+    assert len(buttons) == 1
+    assert "View" in buttons[0].text
+    assert buttons[0].callback_data == "view:work:0.0"
+
+
+@pytest.mark.asyncio
+async def test_callback_approve_sends_y_to_pane():
+    """Approve button sends 'y' to the correct pane."""
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+
+    query = AsyncMock()
+    query.data = "approve:work:0.0"
+    query.message = AsyncMock()
+    query.message.text = "Some notification text"
+
+    update = MagicMock()
+    update.callback_query = query
+
+    with patch("claude_monitor.telegram_bot.send_keys", return_value=True) as mock_send_keys:
+        await bot._handle_button_press(update, MagicMock())
+
+    mock_send_keys.assert_called_once_with("work:0.0", "y")
+    query.answer.assert_called_once()
+    query.edit_message_text.assert_called_once()
+    edit_text = query.edit_message_text.call_args.kwargs.get("text", query.edit_message_text.call_args[1].get("text", ""))
+    assert "Approved" in edit_text
+
+
+@pytest.mark.asyncio
+async def test_callback_deny_sends_n_to_pane():
+    """Deny button sends 'n' to the correct pane."""
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+
+    query = AsyncMock()
+    query.data = "deny:work:0.0"
+    query.message = AsyncMock()
+    query.message.text = "Some notification text"
+
+    update = MagicMock()
+    update.callback_query = query
+
+    with patch("claude_monitor.telegram_bot.send_keys", return_value=True) as mock_send_keys:
+        await bot._handle_button_press(update, MagicMock())
+
+    mock_send_keys.assert_called_once_with("work:0.0", "n")
+    query.answer.assert_called_once()
+    query.edit_message_text.assert_called_once()
+    edit_text = query.edit_message_text.call_args.kwargs.get("text", query.edit_message_text.call_args[1].get("text", ""))
+    assert "Denied" in edit_text
+
+
+@pytest.mark.asyncio
+async def test_callback_view_captures_pane():
+    """View button captures pane content and sends it as reply."""
+    bot = TelegramBot("token", 123, "test-machine", StateTracker())
+
+    query = AsyncMock()
+    query.data = "view:work:0.0"
+    query.message = AsyncMock()
+    query.message.text = "Some notification text"
+
+    update = MagicMock()
+    update.callback_query = query
+
+    with patch("claude_monitor.telegram_bot.capture_pane", return_value="pane content here") as mock_capture:
+        await bot._handle_button_press(update, MagicMock())
+
+    mock_capture.assert_called_once_with("work:0.0", context_lines=30)
+    query.answer.assert_called_once()
+    query.message.reply_text.assert_called_once()
+    reply_text = query.message.reply_text.call_args[0][0]
+    assert "pane content here" in reply_text
+
+
+# --- Reply routing tests ---
+
+def test_extract_pane_from_notification_with_alias():
+    assert extract_pane_from_notification("Session: <code>1: work:0.0</code>") == "work:0.0"
+
+
+def test_extract_pane_from_notification_without_alias():
+    assert extract_pane_from_notification("Session: <code>work:0.0</code>") == "work:0.0"
+
+
+def test_extract_pane_from_notification_no_match():
+    assert extract_pane_from_notification("random text") is None
+
+
+def test_extract_pane_from_notification_in_full_message():
+    msg = '🟢 <b>[xin-4090] Claude Code finished task</b>\nSession: <code>2: copilot-api:1.0</code>\n\n<pre>some output</pre>'
+    assert extract_pane_from_notification(msg) == "copilot-api:1.0"
+
+
+# --- Smart Silence tests ---
+
+def test_silence_suppresses_recent_interaction():
+    import time
+    bot = TelegramBot("token", 123, "test", StateTracker(), notification_silence_seconds=300)
+    bot._last_interaction = time.time()
+    assert bot._should_suppress_notification() is True
+
+
+def test_silence_expires_after_threshold():
+    import time
+    bot = TelegramBot("token", 123, "test", StateTracker(), notification_silence_seconds=1)
+    bot._last_interaction = time.time() - 2
+    assert bot._should_suppress_notification() is False
+
+
+def test_silence_disabled_when_zero():
+    import time
+    bot = TelegramBot("token", 123, "test", StateTracker(), notification_silence_seconds=0)
+    bot._last_interaction = time.time()
+    assert bot._should_suppress_notification() is False
+
+
+def test_silence_no_interaction_yet():
+    bot = TelegramBot("token", 123, "test", StateTracker(), notification_silence_seconds=300)
+    assert bot._should_suppress_notification() is False

@@ -21,6 +21,7 @@ class Monitor:
             chat_id=config.telegram_chat_id,
             machine_name=config.machine_name,
             state_tracker=self._state_tracker,
+            notification_silence_seconds=config.notification_silence_seconds,
         )
         self._running = False
         self._known_panes: set[str] = set()

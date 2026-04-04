@@ -2,12 +2,14 @@ import asyncio
 import logging
 import random
 import re
+import time
 from html import escape as escape_html
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import Conflict, TimedOut
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -113,6 +115,15 @@ def parse_send_command(args: str) -> tuple[str, str | None, str] | None:
     return (target, None, rest)
 
 
+def extract_pane_from_notification(text: str) -> str | None:
+    """Extract pane_id from notification message.
+
+    Matches 'Session: <code>pane_id</code>' or 'Session: <code>N: pane_id</code>'
+    """
+    match = re.search(r"Session:.*?<code>(?:\d+:\s*)?(.+?)</code>", text)
+    return match.group(1) if match else None
+
+
 class TelegramBot:
     """Telegram bot for notifications and remote control."""
 
@@ -122,6 +133,7 @@ class TelegramBot:
         chat_id: int,
         machine_name: str,
         state_tracker: StateTracker,
+        notification_silence_seconds: int = 300,
     ):
         self._bot_token = bot_token
         self._chat_id = chat_id
@@ -135,6 +147,9 @@ class TelegramBot:
         self._pane_aliases: dict[str, int] = {}
         self._alias_to_pane: dict[int, str] = {}
         self._next_alias: int = 1
+        # Smart Silence: suppress notifications when user recently interacted
+        self._last_interaction: float = 0.0
+        self._silence_seconds = notification_silence_seconds
 
     async def initialize(self) -> None:
         self._app = (
@@ -146,6 +161,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("view", self._handle_view))
         self._app.add_handler(CommandHandler("send", self._handle_send))
         self._app.add_handler(CommandHandler("machines", self._handle_machines))
+        self._app.add_handler(CallbackQueryHandler(self._handle_button_press))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_quick_reply)
         )
@@ -219,11 +235,37 @@ class TelegramBot:
         """Send a notification message for a state transition."""
         if not self._app:
             return
+        if self._should_suppress_notification():
+            logger.debug("Notification suppressed (user active on Telegram)")
+            return
         alias = self._pane_aliases.get(transition.pane_id)
         msg = format_notification(self._machine_name, transition, alias=alias)
+
+        # Build inline keyboard based on transition state
+        pane_id = transition.pane_id
+        reply_markup = None
+        if transition.new_state == PaneState.PERMISSION:
+            keyboard = [[
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{pane_id}"),
+                InlineKeyboardButton("❌ Deny", callback_data=f"deny:{pane_id}"),
+            ]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+        elif transition.new_state in (PaneState.IDLE, PaneState.NEEDS_INPUT):
+            keyboard = [[
+                InlineKeyboardButton("📺 View", callback_data=f"view:{pane_id}"),
+            ]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
         await self._app.bot.send_message(
-            chat_id=self._chat_id, text=msg, parse_mode="HTML"
+            chat_id=self._chat_id, text=msg, parse_mode="HTML",
+            reply_markup=reply_markup,
         )
+
+    def _should_suppress_notification(self) -> bool:
+        """Check if notifications should be suppressed due to recent user interaction."""
+        if self._silence_seconds <= 0:
+            return False
+        return (time.time() - self._last_interaction) < self._silence_seconds
 
     def update_waiting_panes(self, pane_states: dict[str, PaneState]) -> None:
         """Update the list of panes waiting for input."""
@@ -264,11 +306,51 @@ class TelegramBot:
             return f"{alias}: {pane_id}"
         return pane_id
 
+    async def _handle_button_press(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle inline keyboard button presses."""
+        query = update.callback_query
+        await query.answer()
+
+        if not query.data:
+            return
+
+        parts = query.data.split(":", 1)
+        if len(parts) != 2:
+            return
+        action, pane_id = parts[0], parts[1]
+
+        if action == "approve":
+            ok = send_keys(pane_id, "y")
+            status = "✅ Approved" if ok else "❌ Failed to approve"
+            await query.edit_message_text(
+                text=query.message.text + f"\n\n{status}", parse_mode="HTML"
+            )
+        elif action == "deny":
+            ok = send_keys(pane_id, "n")
+            status = "❌ Denied" if ok else "❌ Failed to deny"
+            await query.edit_message_text(
+                text=query.message.text + f"\n\n{status}", parse_mode="HTML"
+            )
+        elif action == "view":
+            content = capture_pane(pane_id, context_lines=30)
+            if content:
+                if len(content) > 3900:
+                    content = content[-3900:]
+                label = self._format_pane_label(pane_id)
+                await query.message.reply_text(
+                    f"📺 {label}:\n```\n{content}\n```", parse_mode="Markdown"
+                )
+            else:
+                await query.message.reply_text(f"Could not capture pane {pane_id}")
+
     async def _handle_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         if not self._is_authorized(update):
             return
+        self._last_interaction = time.time()
 
         args = context.args or []
         # /status with a different machine name: ignore (not for us)
@@ -294,6 +376,7 @@ class TelegramBot:
     ) -> None:
         if not self._is_authorized(update):
             return
+        self._last_interaction = time.time()
 
         args = context.args or []
         if not args:
@@ -338,6 +421,7 @@ class TelegramBot:
     ) -> None:
         if not self._is_authorized(update):
             return
+        self._last_interaction = time.time()
 
         raw_args = " ".join(context.args) if context.args else ""
         parsed = parse_send_command(raw_args)
@@ -383,6 +467,7 @@ class TelegramBot:
     ) -> None:
         if not self._is_authorized(update):
             return
+        self._last_interaction = time.time()
 
         # This machine only knows about itself
         states = self._state_tracker.get_all_states()
@@ -398,6 +483,21 @@ class TelegramBot:
         """Forward plain text to the sole waiting pane (quick reply shortcut)."""
         if not self._is_authorized(update):
             return
+        self._last_interaction = time.time()
+
+        # Reply routing: if replying to a notification, route to that pane
+        if update.message.reply_to_message is not None:
+            original_text = update.message.reply_to_message.text or ""
+            pane_id = extract_pane_from_notification(original_text)
+            if pane_id:
+                text = update.message.text
+                ok = send_keys(pane_id, text)
+                label = self._format_pane_label(pane_id)
+                if ok:
+                    await update.message.reply_text(f"✅ → {label}")
+                else:
+                    await update.message.reply_text(f"❌ Failed to send to {label}")
+                return
 
         if len(self._waiting_panes) != 1:
             if len(self._waiting_panes) == 0:

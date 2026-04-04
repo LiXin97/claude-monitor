@@ -55,3 +55,14 @@ def test_load_config_with_sessions(tmp_path):
     config_path.write_text(yaml.dump(cfg_dict))
     cfg = load_config(str(config_path))
     assert cfg.sessions == ["mysession:0.0"]
+
+
+def test_load_config_with_silence():
+    from claude_monitor.config import Config
+    config = Config(
+        telegram_bot_token="token",
+        telegram_chat_id=123,
+        machine_name="test",
+        notification_silence_seconds=600,
+    )
+    assert config.notification_silence_seconds == 600

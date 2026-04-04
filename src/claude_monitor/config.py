@@ -17,6 +17,7 @@ class Config:
     stable_threshold: int = 2
     context_lines: int = 30
     sessions: list[str] = field(default_factory=list)
+    notification_silence_seconds: int = 300
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".claude-monitor" / "config.yaml"
@@ -58,4 +59,5 @@ def load_config(path: str | None = None) -> Config:
         stable_threshold=int(monitor.get("stable_threshold", 2)),
         context_lines=int(monitor.get("context_lines", 30)),
         sessions=raw.get("sessions", []),
+        notification_silence_seconds=int(monitor.get("notification_silence_seconds", 300)),
     )
