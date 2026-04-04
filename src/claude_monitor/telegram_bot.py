@@ -121,8 +121,6 @@ class TelegramBot:
         self._poll_task: asyncio.Task | None = None
         # Track which panes are awaiting input (for quick reply)
         self._waiting_panes: list[str] = []
-        # Track seen update IDs to avoid duplicate processing
-        self._seen_updates: set[int] = set()
 
     async def initialize(self) -> None:
         self._app = (
@@ -159,11 +157,10 @@ class TelegramBot:
     async def _poll_updates(self) -> None:
         """Poll for updates with conflict handling for multi-instance sharing.
 
-        Broadcast commands (/status, /machines with no machine-specific arg)
-        are NOT acknowledged via offset, so every machine instance gets a
-        chance to fetch and respond to them.  A local ``_seen_updates`` set
-        prevents duplicate processing on the machine that originally fetched
-        the update.
+        Uses timeout=0 (non-blocking) so multiple machines sharing the same
+        bot token take turns fetching updates.  Each Telegram update is only
+        delivered to one machine — use `/status <machine>` to target a
+        specific one, or bare `/status` to get whichever machine grabs it.
         """
         offset = 0
         while True:
@@ -172,30 +169,8 @@ class TelegramBot:
                     offset=offset, timeout=0
                 )
                 for update in updates:
-                    uid = update.update_id
-                    if uid in self._seen_updates:
-                        # Already processed locally — just advance offset
-                        offset = uid + 1
-                        continue
-
-                    self._seen_updates.add(uid)
-
-                    # Determine if this update is a broadcast command
-                    # (should be left for other machines to pick up too)
-                    broadcast = self._is_broadcast(update)
-
-                    if not broadcast:
-                        # Targeted or non-command — safe to acknowledge
-                        offset = uid + 1
-
+                    offset = update.update_id + 1
                     await self._app.process_update(update)
-
-                # Cap seen set size to avoid unbounded growth
-                if len(self._seen_updates) > 500:
-                    cutoff = max(self._seen_updates) - 200
-                    self._seen_updates = {
-                        u for u in self._seen_updates if u > cutoff
-                    }
             except Conflict:
                 pass  # Another instance grabbed this poll, try again next cycle
             except asyncio.CancelledError:
@@ -220,22 +195,6 @@ class TelegramBot:
             update.effective_chat is not None
             and update.effective_chat.id == self._chat_id
         )
-
-    @staticmethod
-    def _is_broadcast(update: Update) -> bool:
-        """Check if an update is a broadcast command (all machines should see it).
-
-        Broadcast commands: /status (no args), /machines (no args).
-        Targeted commands: /status <machine>, /view <machine>, /send ..., plain text.
-        """
-        msg = update.message
-        if not msg or not msg.text:
-            return False
-        text = msg.text.strip()
-        # /status or /machines with no arguments → broadcast
-        if text in ("/status", "/machines"):
-            return True
-        return False
 
     async def send_message(self, text: str) -> None:
         """Send a plain text message to the configured chat."""
