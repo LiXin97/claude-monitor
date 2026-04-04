@@ -127,6 +127,8 @@ machine:
 
 All notifications are prefixed with `[machine-name]`. Commands like `/send` and `/view` route by machine name.
 
+> **Note:** Telegram only allows one bot instance to poll for commands at a time. All machines can send notifications simultaneously, but only one machine will receive commands (e.g., `/send`, `/view`). The library handles this automatically with retries — if one machine stops, another will take over polling.
+
 ## How It Works
 
 1. **Scraper** — runs `tmux capture-pane` every 5 seconds on all panes where `pane_current_command == "claude"`

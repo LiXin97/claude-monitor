@@ -76,6 +76,9 @@ def run(config_path, verbose):
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Suppress noisy third-party loggers even in verbose mode
+    for noisy in ("httpx", "httpcore", "telegram"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
         cfg = load_config(config_path)

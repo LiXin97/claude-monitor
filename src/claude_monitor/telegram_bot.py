@@ -131,15 +131,25 @@ class TelegramBot:
         )
         await self._app.initialize()
         await self._app.start()
+
+        # Start polling with conflict handling for multi-machine setups.
+        # Telegram only allows one getUpdates connection per bot token.
+        # If another instance is already polling, we'll get 409 Conflict.
+        # We still start polling — the library retries automatically, and
+        # whichever instance currently holds the poll handles commands.
+        # Notifications (send_message) always work regardless of who polls.
         await self._app.updater.start_polling(drop_pending_updates=True)
 
         # Set bot menu commands
-        await self._app.bot.set_my_commands([
-            BotCommand("status", "Show Claude Code pane states"),
-            BotCommand("view", "View last 30 lines of a pane"),
-            BotCommand("send", "Send input to a pane"),
-            BotCommand("machines", "List all connected machines"),
-        ])
+        try:
+            await self._app.bot.set_my_commands([
+                BotCommand("status", "Show Claude Code pane states"),
+                BotCommand("view", "View last 30 lines of a pane"),
+                BotCommand("send", "Send input to a pane"),
+                BotCommand("machines", "List all connected machines"),
+            ])
+        except Exception:
+            pass  # Non-critical, other instance may have set them
 
     async def shutdown(self) -> None:
         if self._app:
