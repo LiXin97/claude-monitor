@@ -31,7 +31,7 @@ claude-monitor watches your tmux panes, detects when Claude Code changes state, 
   - Asks for permission (🔴 permission)
 - **Inline buttons** — Approve/Deny permission requests or View terminal output directly from the notification
 - **Reply routing** — reply to any notification message to send text to that specific pane
-- **Smart silence** — suppresses notifications when you're actively using Telegram (configurable window, default 5 min)
+- **Smart silence** — suppresses notifications when you're actively using Telegram (configurable window, disabled by default)
 - **Hook integration** — optional HTTP hook server receives Claude Code events (Stop, Notification, PermissionRequest) for instant, zero-delay notifications
 - **Blocking permission approval** — PermissionRequest hooks block Claude Code until you approve or deny via Telegram
 - **Smart filtering** — only notifies on actionable states; ignores transitions to working/unknown
@@ -117,12 +117,13 @@ telegram:
 
 machine:
   name: "my-server"       # shows in notifications as [my-server]
+  index: 0                 # unique per machine (0, 1, 2...) — staggers polling to prevent message loss
 
 monitor:
   poll_interval: 5         # seconds between checks
   stable_threshold: 2      # polls before notification (avoids flapping)
   context_lines: 30        # terminal lines to capture
-  notification_silence_seconds: 300  # suppress notifications for N seconds after user interaction (0 to disable)
+  notification_silence_seconds: 0  # suppress notifications for N seconds after user interaction (0 = disabled)
   hooks_enabled: false     # enable Claude Code hooks integration
   hook_server_port: 9876   # HTTP port for hook server
 
@@ -144,21 +145,23 @@ When hooks are enabled, the monitor starts an HTTP server on `localhost:9876`. C
 
 ## Multi-Machine Setup
 
-Use the **same** `bot_token` and `chat_id` on every machine. Just set a different `machine.name`:
+Use the **same** `bot_token` and `chat_id` on every machine. Set a different `machine.name` and a unique `machine.index` (starting from 0):
 
 ```yaml
 # On server-a
 machine:
   name: "server-a"
+  index: 0
 
 # On server-b
 machine:
   name: "server-b"
+  index: 1
 ```
 
 All notifications are prefixed with `[machine-name]`. Commands like `/send` and `/view` route by machine name.
 
-Each machine uses non-blocking polls with conflict handling, so all instances can coexist and take turns processing commands. Notifications always work from every machine.
+The `index` staggers each machine's Telegram polling interval (by `index × 1.5s`) so they don't compete for the same updates simultaneously. This prevents message loss when multiple machines share one bot token.
 
 ## How It Works
 
