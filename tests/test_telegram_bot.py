@@ -229,8 +229,8 @@ def test_notification_permission_has_approve_deny_buttons():
     assert len(buttons) == 2
     assert "Approve" in buttons[0].text
     assert "Deny" in buttons[1].text
-    assert buttons[0].callback_data == "approve:work:0.0"
-    assert buttons[1].callback_data == "deny:work:0.0"
+    assert buttons[0].callback_data == "approve:test-machine:work:0.0"
+    assert buttons[1].callback_data == "deny:test-machine:work:0.0"
 
 
 def test_notification_idle_has_view_button():
@@ -260,7 +260,7 @@ def test_notification_idle_has_view_button():
     buttons = reply_markup.inline_keyboard[0]
     assert len(buttons) == 1
     assert "View" in buttons[0].text
-    assert buttons[0].callback_data == "view:work:0.0"
+    assert buttons[0].callback_data == "view:test-machine:work:0.0"
 
 
 @pytest.mark.asyncio
@@ -269,7 +269,7 @@ async def test_callback_approve_sends_y_to_pane():
     bot = TelegramBot("token", 123, "test-machine", StateTracker())
 
     query = AsyncMock()
-    query.data = "approve:work:0.0"
+    query.data = "approve:test-machine:work:0.0"
     query.message = AsyncMock()
     query.message.text = "Some notification text"
     query.message.text_html = "Some notification text"
@@ -293,7 +293,7 @@ async def test_callback_deny_sends_n_to_pane():
     bot = TelegramBot("token", 123, "test-machine", StateTracker())
 
     query = AsyncMock()
-    query.data = "deny:work:0.0"
+    query.data = "deny:test-machine:work:0.0"
     query.message = AsyncMock()
     query.message.text = "Some notification text"
     query.message.text_html = "Some notification text"
@@ -317,7 +317,7 @@ async def test_callback_view_captures_pane():
     bot = TelegramBot("token", 123, "test-machine", StateTracker())
 
     query = AsyncMock()
-    query.data = "view:work:0.0"
+    query.data = "view:test-machine:work:0.0"
     query.message = AsyncMock()
     query.message.text = "Some notification text"
 

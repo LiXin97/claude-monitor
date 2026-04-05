@@ -249,16 +249,17 @@ class TelegramBot:
 
         # Build inline keyboard based on transition state
         pane_id = transition.pane_id
+        m = self._machine_name
         reply_markup = None
         if transition.new_state == PaneState.PERMISSION:
             keyboard = [[
-                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{pane_id}"),
-                InlineKeyboardButton("❌ Deny", callback_data=f"deny:{pane_id}"),
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{m}:{pane_id}"),
+                InlineKeyboardButton("❌ Deny", callback_data=f"deny:{m}:{pane_id}"),
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
         elif transition.new_state in (PaneState.IDLE, PaneState.NEEDS_INPUT):
             keyboard = [[
-                InlineKeyboardButton("📺 View", callback_data=f"view:{pane_id}"),
+                InlineKeyboardButton("📺 View", callback_data=f"view:{m}:{pane_id}"),
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -358,15 +359,48 @@ class TelegramBot:
     ) -> None:
         """Handle inline keyboard button presses."""
         query = update.callback_query
-        await query.answer()
 
         if not query.data:
+            await query.answer()
             return
 
-        parts = query.data.split(":", 1)
-        if len(parts) != 2:
+        # Hook buttons use "hook_approve:req_id" / "hook_deny:req_id" (no machine)
+        if query.data.startswith("hook_"):
+            await query.answer()
+            parts = query.data.split(":", 1)
+            if len(parts) != 2:
+                return
+            action, req_id = parts
+            if action == "hook_approve" and self._hook_server:
+                self._hook_server.resolve_permission(req_id, allow=True)
+                try:
+                    await query.edit_message_text(
+                        text=query.message.text_html + "\n\n✅ Allowed", parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+            elif action == "hook_deny" and self._hook_server:
+                self._hook_server.resolve_permission(req_id, allow=False)
+                try:
+                    await query.edit_message_text(
+                        text=query.message.text_html + "\n\n❌ Denied", parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
             return
-        action, pane_id = parts[0], parts[1]
+
+        # Pane buttons use "action:machine:pane_id"
+        parts = query.data.split(":", 2)
+        if len(parts) != 3:
+            await query.answer()
+            return
+        action, machine, pane_id = parts
+
+        # Ignore if this button is not for our machine
+        if machine != self._machine_name:
+            return
+
+        await query.answer()
 
         if action == "approve":
             ok = send_keys(pane_id, "y")
@@ -397,22 +431,6 @@ class TelegramBot:
                 )
             else:
                 await query.message.reply_text(f"Could not capture pane {pane_id}")
-        elif action == "hook_approve" and self._hook_server:
-            self._hook_server.resolve_permission(pane_id, allow=True)
-            try:
-                await query.edit_message_text(
-                    text=query.message.text_html + "\n\n✅ Allowed", parse_mode="HTML"
-                )
-            except Exception:
-                pass
-        elif action == "hook_deny" and self._hook_server:
-            self._hook_server.resolve_permission(pane_id, allow=False)
-            try:
-                await query.edit_message_text(
-                    text=query.message.text_html + "\n\n❌ Denied", parse_mode="HTML"
-                )
-            except Exception:
-                pass
 
     async def _handle_status(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
