@@ -157,29 +157,11 @@ class HookServer:
         cwd = body.get("cwd", "")
         project = _project_name(cwd)
         pane_label = self._pane_label_for_cwd(cwd)
-        last_msg = body.get("last_assistant_message", "")
-        label = f"[{self._machine_name}] " if self._machine_name else ""
-
-        # Build a short preview of what Claude said
-        preview = ""
-        if last_msg:
-            # First non-empty line, truncated
-            for line in last_msg.strip().splitlines():
-                line = line.strip()
-                if line:
-                    preview = line[:200]
-                    break
-
-        header = f"🏁 {label}Claude Code turn ended"
-        parts = [header]
-        if pane_label:
-            parts.append(f"Session: <code>{pane_label}</code>")
-        if project:
-            parts.append(f"Project: <code>{project}</code>")
-        if preview:
-            parts.append(f"\n{preview}")
-        msg = "\n".join(parts)
-        await self._telegram_bot.send_message(msg, parse_mode="HTML")
+        # Stop hook fires every turn end — the tmux scraper already detects
+        # IDLE state, so just log it instead of sending a Telegram message.
+        logger.info(
+            "Stop hook: project=%s pane=%s", project or cwd, pane_label or "?"
+        )
         await self._send_response(writer, 200, {"status": "ok"})
 
     async def _handle_notification(
@@ -187,6 +169,17 @@ class HookServer:
     ) -> None:
         message = body.get("message", "")
         cwd = body.get("cwd", "")
+        notification_type = body.get("notification_type", "")
+
+        # Suppress notification types already handled by tmux scraper
+        if notification_type in ("idle_prompt", "permission_prompt"):
+            logger.debug(
+                "Suppressed duplicate %s notification for %s",
+                notification_type, _project_name(cwd) or cwd,
+            )
+            await self._send_response(writer, 200, {"status": "ok"})
+            return
+
         project = _project_name(cwd)
         pane_label = self._pane_label_for_cwd(cwd)
         label = f"[{self._machine_name}] " if self._machine_name else ""

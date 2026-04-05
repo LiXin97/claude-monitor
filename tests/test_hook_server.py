@@ -30,8 +30,8 @@ async def test_hook_server_starts_and_stops(hook_server):
 
 
 @pytest.mark.asyncio
-async def test_hook_stop_triggers_notification(hook_server):
-    """POST /hook/stop sends a Telegram notification with project name."""
+async def test_hook_stop_logs_only(hook_server):
+    """POST /hook/stop returns OK but does not send Telegram message (scraper handles it)."""
     await hook_server.start()
     port = hook_server.port
 
@@ -55,10 +55,7 @@ async def test_hook_stop_triggers_notification(hook_server):
     await writer.wait_closed()
 
     assert b"200" in response
-    hook_server._telegram_bot.send_message.assert_called_once()
-    msg = hook_server._telegram_bot.send_message.call_args[0][0]
-    assert "project" in msg  # project name extracted from cwd
-    assert "turn ended" in msg.lower()
+    hook_server._telegram_bot.send_message.assert_not_called()
 
     await hook_server.stop()
 
@@ -94,6 +91,39 @@ async def test_hook_notification_forwards_to_telegram(hook_server):
     msg = hook_server._telegram_bot.send_message.call_args[0][0]
     assert "Task completed" in msg
     assert "my-app" in msg  # project name from cwd
+
+    await hook_server.stop()
+
+
+@pytest.mark.asyncio
+async def test_hook_notification_suppresses_idle_prompt(hook_server):
+    """POST /hook/notification with idle_prompt type is suppressed (scraper handles it)."""
+    await hook_server.start()
+    port = hook_server.port
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    body = json.dumps({
+        "session_id": "abc123",
+        "cwd": "/home/user/my-app",
+        "message": "Claude is waiting for your input",
+        "notification_type": "idle_prompt",
+    })
+    request = (
+        f"POST /hook/notification HTTP/1.1\r\n"
+        f"Host: localhost:{port}\r\n"
+        f"Content-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        f"\r\n"
+        f"{body}"
+    )
+    writer.write(request.encode())
+    await writer.drain()
+    response = await reader.read(4096)
+    writer.close()
+    await writer.wait_closed()
+
+    assert b"200" in response
+    hook_server._telegram_bot.send_message.assert_not_called()
 
     await hook_server.stop()
 
