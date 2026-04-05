@@ -134,6 +134,7 @@ class TelegramBot:
         machine_name: str,
         state_tracker: StateTracker,
         notification_silence_seconds: int = 300,
+        machine_index: int = 0,
     ):
         self._bot_token = bot_token
         self._chat_id = chat_id
@@ -154,6 +155,8 @@ class TelegramBot:
         self._hook_server = None
         # cwd → pane_id mapping (updated each poll cycle)
         self._cwd_to_pane: dict[str, str] = {}
+        # Machine index for staggered polling (prevents message loss in shared-bot mode)
+        self._machine_index = machine_index
 
     async def initialize(self) -> None:
         self._app = (
@@ -192,10 +195,14 @@ class TelegramBot:
         """Poll for updates with conflict handling for multi-instance sharing.
 
         Uses timeout=0 (non-blocking) so multiple machines sharing the same
-        bot token take turns fetching updates.  Each Telegram update is only
-        delivered to one machine — use `/status <machine>` to target a
-        specific one, or bare `/status` to get whichever machine grabs it.
+        bot token take turns fetching updates.  Each machine staggers its
+        polling by machine_index * 1.5s to reduce contention.
         """
+        # Initial delay based on machine_index so machines don't start polling
+        # at the same instant.
+        if self._machine_index > 0:
+            await asyncio.sleep(self._machine_index * 1.5)
+
         offset = 0
         while True:
             try:
@@ -211,7 +218,7 @@ class TelegramBot:
                 return
             except Exception as e:
                 logger.error("Polling error: %s", e)
-            await asyncio.sleep(1.5 + random.random())
+            await asyncio.sleep(1.5 + self._machine_index * 1.5 + random.random())
 
     async def shutdown(self) -> None:
         if self._app:

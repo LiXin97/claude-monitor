@@ -452,3 +452,17 @@ async def test_callback_hook_deny_resolves_permission():
 
     mock_hook_server.resolve_permission.assert_called_once_with("req456", allow=False)
     query.edit_message_text.assert_called_once()
+
+
+# --- Machine index polling tests ---
+
+def test_machine_index_stored():
+    bot = TelegramBot("token", 123, "test", StateTracker(), machine_index=0)
+    assert bot._machine_index == 0
+    bot2 = TelegramBot("token", 123, "test", StateTracker(), machine_index=3)
+    assert bot2._machine_index == 3
+
+
+def test_machine_index_default_zero():
+    bot = TelegramBot("token", 123, "test", StateTracker())
+    assert bot._machine_index == 0

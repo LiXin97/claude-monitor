@@ -23,6 +23,7 @@ class Monitor:
             machine_name=config.machine_name,
             state_tracker=self._state_tracker,
             notification_silence_seconds=config.notification_silence_seconds,
+            machine_index=config.machine_index,
         )
         self._running = False
         self._known_panes: set[str] = set()

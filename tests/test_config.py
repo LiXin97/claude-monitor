@@ -66,3 +66,21 @@ def test_load_config_with_silence():
         notification_silence_seconds=600,
     )
     assert config.notification_silence_seconds == 600
+
+
+def test_load_config_machine_index(tmp_path):
+    cfg_dict = {
+        "telegram": {"bot_token": "123:ABC", "chat_id": 999},
+        "machine": {"name": "box", "index": 2},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg_dict))
+    cfg = load_config(str(config_path))
+    assert cfg.machine_index == 2
+
+
+def test_load_config_machine_index_default(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(VALID_CONFIG))
+    cfg = load_config(str(config_path))
+    assert cfg.machine_index == 0

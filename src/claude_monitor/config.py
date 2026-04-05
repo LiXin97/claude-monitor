@@ -20,6 +20,7 @@ class Config:
     notification_silence_seconds: int = 0
     hooks_enabled: bool = False
     hook_server_port: int = 9876
+    machine_index: int = 0
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".claude-monitor" / "config.yaml"
@@ -77,6 +78,7 @@ def load_config(path: str | None = None) -> Config:
             notification_silence_seconds=int(monitor.get("notification_silence_seconds", 0)),
             hooks_enabled=_parse_bool(monitor.get("hooks_enabled", False)),
             hook_server_port=int(monitor.get("hook_server_port", 9876)),
+            machine_index=int(machine.get("index", 0)),
         )
     except (ValueError, TypeError) as e:
         raise ConfigError(f"Invalid config value: {e}")
