@@ -276,7 +276,6 @@ class TelegramBot:
     async def send_hook_permission(
         self,
         request_id: str,
-        label: str,
         tool_name: str,
         input_preview: str,
         project: str = "",
@@ -285,6 +284,7 @@ class TelegramBot:
         """Send a hook permission request with Approve/Deny buttons."""
         if not self._app:
             return
+        label = f"[{self._machine_name}] " if self._machine_name else ""
         parts = [f"🔐 {label}Claude Code permission request"]
         if pane_label:
             parts.append(f"Session: <code>{escape_html(pane_label)}</code>")
@@ -332,6 +332,13 @@ class TelegramBot:
     def update_pane_cwds(self, pane_cwds: dict[str, str]) -> None:
         """Update the cwd → pane_id mapping (called each poll cycle)."""
         self._cwd_to_pane = {cwd: pid for pid, cwd in pane_cwds.items()}
+
+    def pane_label_for_cwd(self, cwd: str) -> str:
+        """Resolve a working directory to a pane label like '1: copilot-api:1.0'."""
+        pane_id = self._cwd_to_pane.get(cwd)
+        if pane_id:
+            return self._format_pane_label(pane_id)
+        return ""
 
     def _resolve_pane(self, alias_or_id: str) -> str | None:
         """Resolve a numeric alias or raw pane_id to a pane_id."""

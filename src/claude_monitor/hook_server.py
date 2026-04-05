@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import uuid
+from html import escape as escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ class HookServer:
         self._permission_timeout = permission_timeout
         self._machine_name = machine_name
         self._server: asyncio.Server | None = None
-        # Pending permission requests: req_id → (Event, result_dict)
         self._pending_permissions: dict[str, tuple[asyncio.Event, dict]] = {}
 
     @property
@@ -57,7 +57,6 @@ class HookServer:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-        # Unblock any pending permissions
         for req_id in list(self._pending_permissions):
             self.resolve_permission(req_id, allow=False)
 
@@ -74,11 +73,17 @@ class HookServer:
             result["reason"] = "User denied via Telegram"
         event.set()
 
+    def _extract_hook_context(self, body: dict) -> tuple[str, str, str]:
+        """Extract (cwd, project_name, pane_label) from a hook payload."""
+        cwd = body.get("cwd", "")
+        project = _project_name(cwd)
+        pane_label = self._telegram_bot.pane_label_for_cwd(cwd)
+        return cwd, project, pane_label
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         try:
-            # Read request line
             request_line = await asyncio.wait_for(reader.readline(), timeout=10)
             if not request_line:
                 writer.close()
@@ -91,7 +96,6 @@ class HookServer:
 
             method, path = parts[0], parts[1]
 
-            # Read headers
             content_length = 0
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=10)
@@ -101,7 +105,6 @@ class HookServer:
                 if header.startswith("content-length:"):
                     content_length = int(header.split(":", 1)[1].strip())
 
-            # Read body
             body = {}
             if content_length > 0:
                 raw = await asyncio.wait_for(
@@ -109,7 +112,6 @@ class HookServer:
                 )
                 body = json.loads(raw)
 
-            # Route
             if path == "/hook/stop" and method == "POST":
                 await self._handle_stop(body, writer)
             elif path == "/hook/notification" and method == "POST":
@@ -146,50 +148,36 @@ class HookServer:
         writer.write(header.encode() + payload)
         await writer.drain()
 
-    def _pane_label_for_cwd(self, cwd: str) -> str:
-        """Resolve cwd to a pane label like '1: copilot-api:1.0', or '' if unknown."""
-        pane_id = self._telegram_bot._cwd_to_pane.get(cwd)
-        if pane_id:
-            return self._telegram_bot._format_pane_label(pane_id)
-        return ""
-
     async def _handle_stop(self, body: dict, writer: asyncio.StreamWriter) -> None:
+        # Stop hook fires every turn end — tmux scraper already detects IDLE.
         cwd = body.get("cwd", "")
-        project = _project_name(cwd)
-        pane_label = self._pane_label_for_cwd(cwd)
-        # Stop hook fires every turn end — the tmux scraper already detects
-        # IDLE state, so just log it instead of sending a Telegram message.
-        logger.info(
-            "Stop hook: project=%s pane=%s", project or cwd, pane_label or "?"
-        )
+        logger.info("Stop hook: project=%s", _project_name(cwd) or cwd)
         await self._send_response(writer, 200, {"status": "ok"})
 
     async def _handle_notification(
         self, body: dict, writer: asyncio.StreamWriter
     ) -> None:
         message = body.get("message", "")
-        cwd = body.get("cwd", "")
         notification_type = body.get("notification_type", "")
 
-        # Suppress notification types already handled by tmux scraper
+        # Suppress types already handled by tmux scraper
         if notification_type in ("idle_prompt", "permission_prompt"):
             logger.debug(
                 "Suppressed duplicate %s notification for %s",
-                notification_type, _project_name(cwd) or cwd,
+                notification_type, _project_name(body.get("cwd", "")) or "?",
             )
             await self._send_response(writer, 200, {"status": "ok"})
             return
 
-        project = _project_name(cwd)
-        pane_label = self._pane_label_for_cwd(cwd)
+        _, project, pane_label = self._extract_hook_context(body)
         label = f"[{self._machine_name}] " if self._machine_name else ""
 
         header = f"ℹ️ {label}Claude Code notification"
         parts = [header]
         if pane_label:
-            parts.append(f"Session: <code>{pane_label}</code>")
+            parts.append(f"Session: <code>{escape_html(pane_label)}</code>")
         if project:
-            parts.append(f"Project: <code>{project}</code>")
+            parts.append(f"Project: <code>{escape_html(project)}</code>")
         if message:
             parts.append(f"\n{message}")
         msg = "\n".join(parts)
@@ -201,10 +189,7 @@ class HookServer:
     ) -> None:
         tool_name = body.get("tool_name", "unknown")
         tool_input = body.get("tool_input", {})
-        session_id = body.get("session_id", "unknown")
-        cwd = body.get("cwd", "")
-        project = _project_name(cwd)
-        pane_label = self._pane_label_for_cwd(cwd)
+        _, project, pane_label = self._extract_hook_context(body)
 
         req_id = uuid.uuid4().hex[:12]
         event = asyncio.Event()
@@ -212,22 +197,18 @@ class HookServer:
 
         self._pending_permissions[req_id] = (event, result)
 
-        # Send Telegram notification with buttons
-        label = f"[{self._machine_name}] " if self._machine_name else ""
         input_preview = json.dumps(tool_input, ensure_ascii=False)
         if len(input_preview) > 500:
             input_preview = input_preview[:500] + "…"
 
         await self._telegram_bot.send_hook_permission(
             request_id=req_id,
-            label=label,
             tool_name=tool_name,
             input_preview=input_preview,
             project=project,
             pane_label=pane_label,
         )
 
-        # Block until user responds or timeout
         try:
             await asyncio.wait_for(event.wait(), timeout=self._permission_timeout)
         except asyncio.TimeoutError:
@@ -236,7 +217,6 @@ class HookServer:
 
         self._pending_permissions.pop(req_id, None)
 
-        # Format response for Claude Code PreToolUse hook
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

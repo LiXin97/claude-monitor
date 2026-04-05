@@ -394,7 +394,6 @@ async def test_send_hook_permission_sends_message_with_buttons():
 
     await bot.send_hook_permission(
         request_id="abc123",
-        label="[test] ",
         tool_name="Bash",
         input_preview='{"command": "ls"}',
         project="my-project",
