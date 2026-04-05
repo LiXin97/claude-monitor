@@ -38,7 +38,7 @@ def init():
     click.echo("  2. Send /newbot and follow the prompts")
     click.echo("  3. Copy the bot token\n")
 
-    bot_token = click.prompt("Telegram bot token")
+    bot_token = click.prompt("Telegram bot token", hide_input=True)
 
     click.echo("\nStep 2: Get your Telegram chat ID")
     click.echo("  1. Send any message to your new bot")

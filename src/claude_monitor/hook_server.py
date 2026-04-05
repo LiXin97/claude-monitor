@@ -179,7 +179,7 @@ class HookServer:
         if project:
             parts.append(f"Project: <code>{escape_html(project)}</code>")
         if message:
-            parts.append(f"\n{message}")
+            parts.append(f"\n{escape_html(message)}")
         msg = "\n".join(parts)
         await self._telegram_bot.send_message(msg, parse_mode="HTML")
         await self._send_response(writer, 200, {"status": "ok"})
